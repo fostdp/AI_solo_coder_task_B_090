@@ -10,6 +10,7 @@
 5. 负载均衡优化 (Load Balancing)
 """
 import math
+import random
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 from enum import Enum
@@ -24,6 +25,100 @@ from irrigation import (
 class MaintenanceStatus(Enum):
     OPERATIONAL = "operational"
     UNDER_REPAIR = "under_repair"
+
+
+@dataclass
+class CommunicationDelayConfig:
+    base_delay_s: float = 2.0
+    per_km_delay_s: float = 0.5
+    message_loss_rate: float = 0.02
+    retry_delay_s: float = 3.0
+    max_retries: int = 2
+    coordination_overhead_s: float = 1.0
+
+
+@dataclass
+class CommunicationDelayResult:
+    from_wheel_id: str
+    to_wheel_id: str
+    distance_km: float
+    one_way_delay_s: float
+    round_trip_delay_s: float
+    effective_delay_s: float
+    message_lost: bool
+    retries: int
+
+
+class CommunicationDelaySimulator:
+    def __init__(self, config: Optional[CommunicationDelayConfig] = None):
+        self.config = config or CommunicationDelayConfig()
+
+    def estimate_distance_km(self, loc1: Tuple[float, float], loc2: Tuple[float, float]) -> float:
+        dx = (loc1[0] - loc2[0]) * 111.0
+        dy = (loc1[1] - loc2[1]) * 85.0
+        return math.sqrt(dx * dx + dy * dy)
+
+    def simulate_delay(
+        self,
+        from_id: str,
+        to_id: str,
+        from_loc: Tuple[float, float],
+        to_loc: Tuple[float, float],
+    ) -> CommunicationDelayResult:
+        distance = self.estimate_distance_km(from_loc, to_loc)
+        one_way = self.config.base_delay_s + distance * self.config.per_km_delay_s
+        round_trip = one_way * 2
+        retries = 0
+        message_lost = False
+
+        effective = round_trip + self.config.coordination_overhead_s
+        for attempt in range(self.config.max_retries + 1):
+            if random.random() < self.config.message_loss_rate:
+                retries += 1
+                effective += self.config.retry_delay_s
+                if attempt == self.config.max_retries:
+                    message_lost = True
+            else:
+                break
+
+        return CommunicationDelayResult(
+            from_wheel_id=from_id,
+            to_wheel_id=to_id,
+            distance_km=round(distance, 3),
+            one_way_delay_s=round(one_way, 3),
+            round_trip_delay_s=round(round_trip, 3),
+            effective_delay_s=round(effective, 3),
+            message_lost=message_lost,
+            retries=retries,
+        )
+
+    def simulate_all_pairs(self, wheels: List) -> Dict[str, List[CommunicationDelayResult]]:
+        results: Dict[str, List[CommunicationDelayResult]] = {}
+        for i, w1 in enumerate(wheels):
+            if not w1.is_available():
+                continue
+            results[w1.wheel_id] = []
+            for j, w2 in enumerate(wheels):
+                if i == j or not w2.is_available():
+                    continue
+                delay = self.simulate_delay(
+                    w1.wheel_id, w2.wheel_id,
+                    w1.location, w2.location,
+                )
+                results[w1.wheel_id].append(delay)
+        return results
+
+    def compute_coordination_overhead_s(self, wheels: List) -> float:
+        available = [w for w in wheels if w.is_available()]
+        if len(available) <= 1:
+            return 0.0
+        all_delays = self.simulate_all_pairs(available)
+        max_delay = 0.0
+        for wid, delays in all_delays.items():
+            for d in delays:
+                if not d.message_lost and d.effective_delay_s > max_delay:
+                    max_delay = d.effective_delay_s
+        return max_delay
 
 
 @dataclass
@@ -150,12 +245,13 @@ class TimeSlot:
 
 
 class MultiWheelScheduler:
-    def __init__(self):
+    def __init__(self, comm_config: Optional[CommunicationDelayConfig] = None):
         self.wheels: List[WaterWheelUnit] = []
         self.zones: List[IrrigationZone] = []
         self.allocations: List[WheelAllocation] = []
         self._wheel_remaining_hours: Dict[str, float] = {}
         self._wheel_remaining_capacity: Dict[str, float] = {}
+        self._comm_simulator = CommunicationDelaySimulator(comm_config)
 
     def add_wheel(self, wheel_unit: WaterWheelUnit) -> None:
         self.wheels.append(wheel_unit)
@@ -363,6 +459,19 @@ class MultiWheelScheduler:
         revised_total = sum(a.estimated_water_m3 for a in self.allocations)
         remaining_deficit = max(0, target_water_m3 - revised_total)
 
+        comm_delays = self._comm_simulator.simulate_all_pairs(self.wheels)
+        coordination_overhead = self._comm_simulator.compute_coordination_overhead_s(self.wheels)
+        comm_delay_summary = []
+        for wid, delays in comm_delays.items():
+            for d in delays:
+                comm_delay_summary.append({
+                    "from": d.from_wheel_id,
+                    "to": d.to_wheel_id,
+                    "distance_km": d.distance_km,
+                    "effective_delay_s": d.effective_delay_s,
+                    "message_lost": d.message_lost,
+                })
+
         return {
             "target_water_m3": target_water_m3,
             "hours_available": hours_available,
@@ -381,7 +490,9 @@ class MultiWheelScheduler:
                 for a in self.allocations
             ],
             "speed_adjustments": speed_adjustments,
-            "schedule": self._build_time_slots()
+            "schedule": self._build_time_slots(),
+            "communication_delays": comm_delay_summary,
+            "coordination_overhead_s": round(coordination_overhead, 3),
         }
 
     def estimate_completion_time(self, total_water_m3: float) -> Dict:
@@ -556,6 +667,28 @@ class MultiWheelScheduler:
                 "type": "warning",
                 "message": f"总容量不足以满足灌溉需求，缺口约 {deficit_pct}%",
                 "action": "考虑延长灌溉时间、增加水车数量或调整灌溉优先级"
+            })
+
+        comm_delays = self._comm_simulator.simulate_all_pairs(self.wheels)
+        max_delay = 0.0
+        lost_count = 0
+        for wid, delays in comm_delays.items():
+            for d in delays:
+                if d.effective_delay_s > max_delay:
+                    max_delay = d.effective_delay_s
+                if d.message_lost:
+                    lost_count += 1
+        if max_delay > 10.0:
+            recommendations.append({
+                "type": "warning",
+                "message": f"最大通信延迟 {max_delay:.1f}s，协调响应可能不足",
+                "action": "考虑缩短水车间距或增加通信中继"
+            })
+        if lost_count > 0:
+            recommendations.append({
+                "type": "warning",
+                "message": f"{lost_count} 条通信链路丢包，需重试",
+                "action": "检查通信设备或增加冗余链路"
             })
 
         if under_repair:

@@ -48,6 +48,10 @@ class TreadingPhysics:
     INERTIA_TIME_CONSTANT_S = 2.0
     WATER_EFFICIENCY_BASE = 0.55
     PUMP_LITERS_PER_JOULE = 0.000102
+    PEDAL_CRANK_LENGTH_M = 0.17
+    WATER_LOAD_COEFFICIENT = 0.85
+    VIBRATION_BASE_FREQ_HZ = 2.5
+    VIBRATION_AMPLITUDE = 0.15
 
     def __init__(self, simulator: Optional[WaterWheelSimulator] = None):
         self.simulator = simulator or WaterWheelSimulator()
@@ -73,6 +77,48 @@ class TreadingPhysics:
         alpha = 1.0 - math.exp(-dt_s / self.INERTIA_TIME_CONSTANT_S)
         return current_rpm + (target_rpm - current_rpm) * alpha
 
+    def _compute_force_feedback(
+        self, pedal_force: float, pedal_cadence: float,
+        wheel_rpm: float, water_lift_m: float, fatigue: float,
+    ) -> Dict[str, Any]:
+        crank_radius = self.PEDAL_CRANK_LENGTH_M
+        omega = 2 * math.pi * pedal_cadence / 60
+        pedal_torque = pedal_force * crank_radius
+
+        water_resistance_torque = (
+            self.WATER_LOAD_COEFFICIENT
+            * self.simulator.mat.water_density
+            * self.simulator.mat.gravity
+            * water_lift_m
+            * crank_radius
+            * (1.0 + (1.0 - fatigue) * 0.3)
+        )
+        water_resistance_torque /= self.GEAR_RATIO
+
+        mechanical_friction_torque = pedal_torque * self.simulator.mat.wood_friction_coeff * 0.1
+        total_resistance_torque = water_resistance_torque + mechanical_friction_torque
+        resistance_force = total_resistance_torque / max(crank_radius, 0.01)
+
+        load_feel = min(1.0, total_resistance_torque / max(pedal_torque, 0.01))
+
+        vibration_intensity = 0.0
+        if pedal_cadence > 0 and wheel_rpm > 0:
+            vibration_intensity = self.VIBRATION_AMPLITUDE * (
+                0.3 + 0.7 * (pedal_cadence / 60.0)
+            ) * (1.0 + 0.2 * (1.0 - fatigue))
+            vibration_intensity = min(1.0, vibration_intensity)
+
+        vibration_freq = self.VIBRATION_BASE_FREQ_HZ * (pedal_cadence / 30.0)
+
+        return {
+            "pedal_resistance_n": round(resistance_force, 2),
+            "water_resistance_torque_nm": round(water_resistance_torque, 3),
+            "mechanical_friction_torque_nm": round(mechanical_friction_torque, 3),
+            "load_feel": round(load_feel, 4),
+            "vibration_intensity": round(vibration_intensity, 4),
+            "vibration_freq_hz": round(vibration_freq, 2),
+        }
+
     def get_instantaneous_state(
         self, pedal_force: float, pedal_cadence: float, elapsed: float, current_rpm: float = 0.0, dt: float = 0.1
     ) -> Dict[str, Any]:
@@ -96,6 +142,11 @@ class TreadingPhysics:
         )
         sim_output = self.simulator.simulate(sim_input)
 
+        water_lift_m = max(0.0, actual_rpm / (self.GEAR_RATIO * 60.0) * 0.5)
+        force_feedback = self._compute_force_feedback(
+            pedal_force, pedal_cadence, actual_rpm, water_lift_m, fatigue
+        )
+
         return {
             "power_w": effective_power,
             "torque_nm": torque,
@@ -106,6 +157,7 @@ class TreadingPhysics:
             "mechanical_efficiency": sim_output.mechanical_efficiency,
             "overall_efficiency": sim_output.overall_efficiency,
             "drive_torque": sim_output.drive_torque,
+            "force_feedback": force_feedback,
         }
 
     def get_water_lifted(self, duration_s: float, avg_power_w: float) -> float:

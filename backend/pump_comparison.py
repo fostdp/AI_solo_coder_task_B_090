@@ -64,6 +64,7 @@ class EfficiencyComparison:
     efficiency_ratio: float
     flow_rate_m3h: float
     water_level_m: float
+    pump_operating_validation: Optional[Dict] = None
 
 
 @dataclass
@@ -103,6 +104,26 @@ class FullComparison:
     cost: CostComparison
     environmental: EnvironmentalComparison
     recommendation: str
+
+
+@dataclass
+class OperatingRange:
+    min_flow_m3h: float
+    max_flow_m3h: float
+    min_head_m: float
+    max_head_m: float
+    best_efficiency_flow_m3h: float
+    best_efficiency_head_m: float
+
+
+@dataclass
+class OperatingPointValidation:
+    is_within_range: bool
+    flow_deviation_pct: float
+    head_deviation_pct: float
+    warnings: List[str]
+    recommended_flow_m3h: float
+    recommended_head_m: float
 
 
 class CentrifugalPumpModel:
@@ -252,6 +273,54 @@ class CentrifugalPumpModel:
     ) -> float:
         power_kw = self.power_consumption(flow_m3h, head_m)
         return power_kw * hours_per_year * electricity_rate
+
+    def get_operating_range(self) -> OperatingRange:
+        return OperatingRange(
+            min_flow_m3h=self.rated_flow * 0.3,
+            max_flow_m3h=self.rated_flow * 1.5,
+            min_head_m=self.rated_head * 0.5,
+            max_head_m=self.rated_head * 1.3,
+            best_efficiency_flow_m3h=self.rated_flow * 0.95,
+            best_efficiency_head_m=self.rated_head * 1.0,
+        )
+
+    def validate_operating_point(self, flow_m3h: float, head_m: float) -> OperatingPointValidation:
+        rng = self.get_operating_range()
+        warnings = []
+        flow_dev = 0.0
+        head_dev = 0.0
+
+        if rng.best_efficiency_flow_m3h > 0:
+            flow_dev = abs(flow_m3h - rng.best_efficiency_flow_m3h) / rng.best_efficiency_flow_m3h * 100
+        if rng.best_efficiency_head_m > 0:
+            head_dev = abs(head_m - rng.best_efficiency_head_m) / rng.best_efficiency_head_m * 100
+
+        if flow_m3h < rng.min_flow_m3h:
+            warnings.append(f"流量{flow_m3h:.1f}m3/h低于最小允许流量{rng.min_flow_m3h:.1f}m3/h，存在过热风险")
+        elif flow_m3h > rng.max_flow_m3h:
+            warnings.append(f"流量{flow_m3h:.1f}m3/h超过最大允许流量{rng.max_flow_m3h:.1f}m3/h，电机过载风险")
+
+        if head_m < rng.min_head_m:
+            warnings.append(f"扬程{head_m:.1f}m低于最小运行扬程{rng.min_head_m:.1f}m，效率严重偏离")
+        elif head_m > rng.max_head_m:
+            warnings.append(f"扬程{head_m:.1f}m超过最大运行扬程{rng.max_head_m:.1f}m，可能无法供水")
+
+        if flow_dev > 30:
+            warnings.append(f"流量偏离BEP {flow_dev:.1f}%，效率损失显著")
+        if head_dev > 30:
+            warnings.append(f"扬程偏离BEP {head_dev:.1f}%，运行工况不佳")
+
+        is_within = (rng.min_flow_m3h <= flow_m3h <= rng.max_flow_m3h and
+                     rng.min_head_m <= head_m <= rng.max_head_m)
+
+        return OperatingPointValidation(
+            is_within_range=is_within,
+            flow_deviation_pct=round(flow_dev, 2),
+            head_deviation_pct=round(head_dev, 2),
+            warnings=warnings,
+            recommended_flow_m3h=round(rng.best_efficiency_flow_m3h, 2),
+            recommended_head_m=round(rng.best_efficiency_head_m, 2),
+        )
 
 
 class WaterwheelOperatingCost:
@@ -428,6 +497,16 @@ class CrossEraComparison:
 
         efficiency_ratio = pump_eff / ww_eff if ww_eff > 0 else float('inf')
 
+        validation = self.pump_model.validate_operating_point(flow_rate, head)
+        pump_validation_dict = {
+            "is_within_range": validation.is_within_range,
+            "flow_deviation_pct": validation.flow_deviation_pct,
+            "head_deviation_pct": validation.head_deviation_pct,
+            "warnings": validation.warnings,
+            "recommended_flow_m3h": validation.recommended_flow_m3h,
+            "recommended_head_m": validation.recommended_head_m,
+        }
+
         return EfficiencyComparison(
             waterwheel_overall_efficiency=round(ww_eff, 4),
             pump_overall_efficiency=round(pump_eff, 4),
@@ -438,6 +517,7 @@ class CrossEraComparison:
             efficiency_ratio=round(efficiency_ratio, 2),
             flow_rate_m3h=round(flow_rate, 2),
             water_level_m=round(water_level, 2),
+            pump_operating_validation=pump_validation_dict,
         )
 
     def compare_costs(self, annual_operating_hours: float, flow_rate: float = 10.0, water_level: float = 2.0) -> CostComparison:
