@@ -134,6 +134,10 @@
                 <button class="tab-btn active" data-tab="charts">📈 数据图表</button>
                 <button class="tab-btn" data-tab="mechanics">⚙️ 力学分析</button>
                 <button class="tab-btn" data-tab="irrigation">💧 灌溉效率</button>
+                <button class="tab-btn" data-tab="dynasty">🏛️ 朝代演变</button>
+                <button class="tab-btn" data-tab="comparison">⚡ 跨时代对比</button>
+                <button class="tab-btn" data-tab="scheduling">🗂️ 联合调度</button>
+                <button class="tab-btn" data-tab="treading">🚶 虚拟踩踏</button>
                 <button class="tab-btn" data-tab="history">📜 历史数据</button>
             </div>
 
@@ -392,6 +396,200 @@
                                     <div class="result-item highlight"><label>总成本</label><span id="cost-total">0 元</span></div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-dynasty">
+                <div class="dynasty-toolbar">
+                    <div class="form-group">
+                        <label>选择朝代</label>
+                        <select id="dynasty-select">
+                            <option value="han">汉代 (206BC-220AD)</option>
+                            <option value="tang">唐代 (618-907)</option>
+                            <option value="song" selected>宋代 (960-1279)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>仿真转速 (rpm)</label>
+                        <input type="number" id="dynasty-speed" value="15" min="1" max="40">
+                    </div>
+                    <div class="form-group">
+                        <label>水位差 (m)</label>
+                        <input type="number" id="dynasty-level" value="2" min="0.5" max="4" step="0.1">
+                    </div>
+                    <button class="btn-primary" id="btn-dynasty-simulate">🏛️ 朝代仿真</button>
+                    <button class="btn-secondary" id="btn-dynasty-compare">📊 三朝对比</button>
+                </div>
+                <div class="dynasty-content" id="dynasty-content">
+                    <div class="analysis-grid">
+                        <div class="analysis-panel wide" id="dynasty-timeline-panel">
+                            <h3>🕐 技术演变时间线</h3>
+                            <div id="dynasty-timeline" class="timeline-container"></div>
+                        </div>
+                        <div class="analysis-panel wide" id="dynasty-comparison-panel">
+                            <h3>📋 三朝参数对比</h3>
+                            <div id="dynasty-comparison" class="dynasty-comparison-grid"></div>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>🎯 技术评分雷达</h3>
+                            <canvas id="chart-dynasty-radar" height="220"></canvas>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>📈 演变趋势</h3>
+                            <canvas id="chart-dynasty-evolution" height="220"></canvas>
+                        </div>
+                        <div class="analysis-panel wide" id="dynasty-simulation-panel" style="display:none;">
+                            <h3>🔬 朝代仿真结果</h3>
+                            <div id="dynasty-simulation-result"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-comparison">
+                <div class="comparison-toolbar">
+                    <div class="form-group">
+                        <label>水位差 (m)</label>
+                        <input type="number" id="cmp-water-level" value="2" min="0.5" max="10" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>流量 (m³/h)</label>
+                        <input type="number" id="cmp-flow-rate" value="10" min="1" max="500">
+                    </div>
+                    <div class="form-group">
+                        <label>年运行 (小时)</label>
+                        <input type="number" id="cmp-annual-hours" value="2000" min="100" max="8760">
+                    </div>
+                    <button class="btn-primary" id="btn-comparison-full">⚡ 综合对比分析</button>
+                </div>
+                <div class="comparison-content" id="comparison-content">
+                    <div class="analysis-grid">
+                        <div class="analysis-panel wide">
+                            <h3>📈 效率曲线对比</h3>
+                            <canvas id="chart-comparison-efficiency" height="200"></canvas>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>🎯 效率对比</h3>
+                            <div id="comparison-efficiency-rings" class="efficiency-rings"></div>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>💰 年度成本对比</h3>
+                            <canvas id="chart-comparison-cost" height="200"></canvas>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>🌿 环境影响</h3>
+                            <div id="comparison-environmental"></div>
+                        </div>
+                        <div class="analysis-panel wide">
+                            <h3>📋 综合对比摘要</h3>
+                            <div id="comparison-summary"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-scheduling">
+                <div class="scheduling-toolbar">
+                    <button class="btn-secondary" id="btn-sched-add-wheel">➕ 添加水车</button>
+                    <button class="btn-secondary" id="btn-sched-add-zone">🌾 添加灌溉区</button>
+                    <button class="btn-primary" id="btn-sched-optimize">🔄 优化调度</button>
+                    <button class="btn-ghost" id="btn-sched-reset">🗑️ 重置</button>
+                </div>
+                <div class="scheduling-content" id="scheduling-content">
+                    <div class="analysis-grid">
+                        <div class="analysis-panel wide">
+                            <h3>⚙️ 水车编队</h3>
+                            <div id="scheduling-wheels" class="sched-cards-row"></div>
+                        </div>
+                        <div class="analysis-panel wide">
+                            <h3>🌾 灌溉区域</h3>
+                            <div id="scheduling-zones" class="sched-cards-row"></div>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>📊 容量与需求</h3>
+                            <div id="scheduling-capacity"></div>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>🗓️ 调度甘特图</h3>
+                            <canvas id="chart-scheduling-gantt" height="200"></canvas>
+                        </div>
+                        <div class="analysis-panel wide">
+                            <h3>📋 分配方案</h3>
+                            <div id="scheduling-allocations"></div>
+                        </div>
+                        <div class="analysis-panel wide">
+                            <h3>💡 调度建议</h3>
+                            <div id="scheduling-recommendations"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-treading">
+                <div class="treading-layout">
+                    <div class="treading-controls-panel">
+                        <h3>🚶 虚拟踩踏体验</h3>
+                        <div class="form-group">
+                            <label>你的名字</label>
+                            <input type="text" id="tread-username" value="体验者" maxlength="20">
+                        </div>
+                        <div class="form-group">
+                            <label>难度等级</label>
+                            <select id="tread-difficulty">
+                                <option value="1">1 - 轻松</option>
+                                <option value="2">2 - 简单</option>
+                                <option value="3" selected>3 - 适中</option>
+                                <option value="4">4 - 困难</option>
+                                <option value="5">5 - 极限</option>
+                            </select>
+                        </div>
+                        <button class="btn-primary" id="btn-tread-start">🏃 开始踩踏</button>
+                        <button class="btn-secondary" id="btn-tread-stop" style="display:none;">⏹️ 停止</button>
+                        <div class="tread-hint" id="tread-hint">
+                            按 <kbd>Space</kbd> 或 <kbd>↑</kbd> 键踩踏水车
+                        </div>
+                        <div class="tread-dashboard" id="tread-dashboard" style="display:none;">
+                            <div class="tread-metric">
+                                <label>踏频</label>
+                                <span id="tread-cadence">0</span>
+                                <small>rpm</small>
+                            </div>
+                            <div class="tread-metric">
+                                <label>水轮转速</label>
+                                <span id="tread-wheel-speed">0</span>
+                                <small>rpm</small>
+                            </div>
+                            <div class="tread-metric highlight">
+                                <label>已提水</label>
+                                <span id="tread-water">0.0</span>
+                                <small>升</small>
+                            </div>
+                            <div class="tread-metric">
+                                <label>消耗热量</label>
+                                <span id="tread-calories">0.0</span>
+                                <small>kcal</small>
+                            </div>
+                            <div class="tread-metric">
+                                <label>用时</label>
+                                <span id="tread-elapsed">0:00</span>
+                                <small>&nbsp;</small>
+                            </div>
+                            <div class="tread-metric">
+                                <label>疲劳度</label>
+                                <div class="fatigue-bar"><div class="fatigue-fill" id="tread-fatigue"></div></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="treading-right">
+                        <div class="analysis-panel" id="tread-summary-panel" style="display:none;">
+                            <h3>🏆 踩踏成绩</h3>
+                            <div id="tread-summary"></div>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>🏅 排行榜</h3>
+                            <div id="tread-leaderboard"></div>
                         </div>
                     </div>
                 </div>

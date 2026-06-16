@@ -53,6 +53,12 @@ from irrigation import (
     SoilParameters,
     IrrigationSystemConfig
 )
+from dynasty import DynastyType, DynastyEvolutionAnalyzer
+from pump_comparison import CrossEraComparison, FullComparison as _FullCmp
+from scheduling import MultiWheelScheduler, WaterWheelUnit, IrrigationZone, MaintenanceStatus
+from treading import TreadingExperienceManager
+
+from dataclasses import asdict
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 
@@ -658,6 +664,299 @@ async def websocket_alerts(websocket: WebSocket):
         alert_mgr.ws_manager.disconnect(websocket, None)
     except Exception:
         alert_mgr.ws_manager.disconnect(websocket, None)
+
+
+_dynasty_analyzer = DynastyEvolutionAnalyzer()
+_cross_era_comparison = CrossEraComparison()
+_scheduler = MultiWheelScheduler()
+_treading_manager = TreadingExperienceManager()
+
+
+class DynastyParamsRequest(BaseModel):
+    dynasty: str = Field("han", description="朝代: han/tang/song")
+
+class DynastySimulateRequest(BaseModel):
+    dynasty: str = Field("han", description="朝代: han/tang/song")
+    rotational_speed: float = Field(15.0, description="转速 rpm")
+    water_level_diff: float = Field(2.0, description="水位差 m")
+
+class DynastyScoreRequest(BaseModel):
+    dynasty: str = Field("han", description="朝代: han/tang/song")
+
+
+@app.get("/api/dynasty/params")
+async def dynasty_get_params(dynasty: str = "han"):
+    try:
+        dt = DynastyType(dynasty)
+    except ValueError:
+        dt = DynastyType.HAN
+    return _dynasty_analyzer.get_dynasty_params(dt)
+
+
+@app.get("/api/dynasty/compare")
+async def dynasty_compare():
+    return _dynasty_analyzer.compare_dynasties()
+
+
+@app.post("/api/dynasty/simulate")
+async def dynasty_simulate(req: DynastySimulateRequest):
+    try:
+        dt = DynastyType(req.dynasty)
+    except ValueError:
+        dt = DynastyType.HAN
+    return _dynasty_analyzer.simulate_dynasty(dt, req.rotational_speed, req.water_level_diff)
+
+
+@app.get("/api/dynasty/timeline")
+async def dynasty_timeline():
+    return {"timeline": _dynasty_analyzer.get_evolution_timeline()}
+
+
+@app.get("/api/dynasty/score")
+async def dynasty_score(dynasty: str = "han"):
+    try:
+        dt = DynastyType(dynasty)
+    except ValueError:
+        dt = DynastyType.HAN
+    return _dynasty_analyzer.get_technology_score(dt)
+
+
+class ComparisonEfficiencyRequest(BaseModel):
+    water_level: float = Field(2.0, description="水位差 m")
+    flow_rate_m3h: float = Field(10.0, description="流量 m³/h")
+
+class ComparisonCostRequest(BaseModel):
+    annual_operating_hours: float = Field(2000.0, description="年运行小时")
+    flow_rate_m3h: float = Field(10.0, description="流量 m³/h")
+    water_level: float = Field(2.0, description="水位差 m")
+
+class ComparisonFullRequest(BaseModel):
+    water_level: float = Field(2.0, description="水位差 m")
+    flow_rate_m3h: float = Field(10.0, description="流量 m³/h")
+    hours_per_year: float = Field(2000.0, description="年运行小时")
+
+
+@app.post("/api/comparison/efficiency")
+async def comparison_efficiency(req: ComparisonEfficiencyRequest):
+    return _cross_era_comparison.compare_efficiency(req.water_level, req.flow_rate_m3h)
+
+
+@app.post("/api/comparison/costs")
+async def comparison_costs(req: ComparisonCostRequest):
+    return _cross_era_comparison.compare_costs(req.annual_operating_hours, req.flow_rate_m3h, req.water_level)
+
+
+@app.get("/api/comparison/environmental")
+async def comparison_environmental():
+    return _cross_era_comparison.compare_environmental_impact()
+
+
+@app.get("/api/comparison/summary")
+async def comparison_summary():
+    return _cross_era_comparison.get_comparison_summary()
+
+
+@app.get("/api/comparison/curves")
+async def comparison_curves(min_speed: float = 5.0, max_speed: float = 30.0, steps: int = 20):
+    return {"curves": _cross_era_comparison.get_efficiency_curves(min_speed, max_speed, steps)}
+
+
+@app.post("/api/comparison/full")
+async def comparison_full(req: ComparisonFullRequest):
+    result = _cross_era_comparison.compare_at_same_conditions(
+        req.water_level, req.flow_rate_m3h, req.hours_per_year
+    )
+    return asdict(result)
+
+
+class SchedulerAddWheelRequest(BaseModel):
+    wheel_id: str = Field(..., description="水车ID")
+    location_x: float = Field(0.0, description="位置X")
+    location_y: float = Field(0.0, description="位置Y")
+    max_speed: float = Field(25.0, description="最大转速 rpm")
+    available_hours: float = Field(10.0, description="每日可用小时")
+
+class SchedulerAddZoneRequest(BaseModel):
+    zone_id: str = Field(..., description="区域ID")
+    area_m2: float = Field(2000.0, description="面积 m²")
+    crop_type: str = Field("wheat", description="作物类型")
+    soil_type: str = Field("loam", description="土壤类型")
+    water_requirement_m3: float = Field(50.0, description="需水量 m³")
+    elevation_m: float = Field(0.0, description="海拔 m")
+    distance_to_source_m: float = Field(100.0, description="距水源距离 m")
+    priority: int = Field(3, description="优先级 1-5")
+
+class SchedulerOptimizeRequest(BaseModel):
+    target_water_m3: float = Field(100.0, description="目标总水量 m³")
+    hours_available: float = Field(8.0, description="可用小时")
+
+
+@app.post("/api/scheduling/wheels")
+async def scheduling_add_wheel(req: SchedulerAddWheelRequest):
+    wheel = WaterWheelUnit(
+        wheel_id=req.wheel_id,
+        location=(req.location_x, req.location_y),
+        geometry_params=WaterWheelGeometry(),
+        material_params=MaterialProperties(),
+        max_speed=req.max_speed,
+        available_hours_per_day=req.available_hours
+    )
+    _scheduler.add_wheel(wheel)
+    return {"success": True, "wheel_id": req.wheel_id}
+
+
+@app.get("/api/scheduling/wheels")
+async def scheduling_list_wheels():
+    return {"wheels": _scheduler.get_wheel_status()}
+
+
+@app.post("/api/scheduling/zones")
+async def scheduling_add_zone(req: SchedulerAddZoneRequest):
+    try:
+        crop = CropType(req.crop_type)
+    except ValueError:
+        crop = CropType.GENERAL
+    try:
+        soil = SoilType(req.soil_type)
+    except ValueError:
+        soil = SoilType.LOAM
+    zone = IrrigationZone(
+        zone_id=req.zone_id,
+        area_m2=req.area_m2,
+        crop_type=crop,
+        soil_type=soil,
+        water_requirement_m3=req.water_requirement_m3,
+        elevation_m=req.elevation_m,
+        distance_to_source_m=req.distance_to_source_m,
+        priority=req.priority
+    )
+    _scheduler.add_zone(zone)
+    return {"success": True, "zone_id": req.zone_id}
+
+
+@app.get("/api/scheduling/zones")
+async def scheduling_list_zones():
+    return {"zones": [{"zone_id": z.zone_id, "area_m2": z.area_m2, "priority": z.priority,
+                        "water_requirement_m3": z.water_requirement_m3} for z in _scheduler._zones]}
+
+
+@app.post("/api/scheduling/optimize")
+async def scheduling_optimize(req: SchedulerOptimizeRequest):
+    return _scheduler.optimize_schedule(req.target_water_m3, req.hours_available)
+
+
+@app.get("/api/scheduling/status")
+async def scheduling_status():
+    return {
+        "total_capacity_m3": _scheduler.calculate_total_capacity(),
+        "wheels": _scheduler.get_wheel_status()
+    }
+
+
+@app.get("/api/scheduling/schedule")
+async def scheduling_generate():
+    return _scheduler.generate_schedule()
+
+
+@app.get("/api/scheduling/recommendations")
+async def scheduling_recommendations():
+    return {"recommendations": _scheduler.get_recommendations()}
+
+
+@app.post("/api/scheduling/reset")
+async def scheduling_reset():
+    global _scheduler
+    _scheduler = MultiWheelScheduler()
+    return {"success": True}
+
+
+class TreadingStartRequest(BaseModel):
+    user_name: str = Field("匿名用户", description="用户名")
+    difficulty: int = Field(3, description="难度 1-5")
+
+class TreadingUpdateRequest(BaseModel):
+    pedal_force: float = Field(100.0, description="踏板力 N")
+    pedal_cadence: float = Field(30.0, description="踏频 rpm")
+    elapsed: float = Field(0.0, description="已过时间 s")
+    dt: float = Field(0.1, description="时间步长 s")
+
+
+@app.post("/api/treading/start")
+async def treading_start(req: TreadingStartRequest):
+    session = _treading_manager.create_session(req.user_name, req.difficulty)
+    return {
+        "session_id": session.session_id,
+        "user_name": session.user_name,
+        "difficulty": session.difficulty_level,
+        "start_time": session.start_time.isoformat() if session.start_time else None
+    }
+
+
+@app.post("/api/treading/{session_id}/update")
+async def treading_update(session_id: str, req: TreadingUpdateRequest):
+    result = _treading_manager.update_session(session_id, {
+        "pedal_force": req.pedal_force,
+        "pedal_cadence": req.pedal_cadence,
+        "elapsed": req.elapsed,
+        "dt": req.dt
+    })
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return result
+
+
+@app.post("/api/treading/{session_id}/end")
+async def treading_end(session_id: str):
+    session = _treading_manager.end_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session.session_id,
+        "user_name": session.user_name,
+        "duration_seconds": session.duration_seconds,
+        "water_lifted_liters": round(session.water_lifted_liters, 2),
+        "calories_burned": round(session.calories_burned, 2),
+        "stroke_count": session.stroke_count,
+        "max_speed_rpm": round(session.max_speed_rpm, 2),
+        "avg_speed_rpm": round(session.avg_speed_rpm, 2),
+        "difficulty_level": session.difficulty_level
+    }
+
+
+@app.get("/api/treading/{session_id}")
+async def treading_get_session(session_id: str):
+    session = _treading_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session.session_id,
+        "user_name": session.user_name,
+        "duration_seconds": session.duration_seconds,
+        "water_lifted_liters": round(session.water_lifted_liters, 2),
+        "calories_burned": round(session.calories_burned, 2),
+        "stroke_count": session.stroke_count,
+        "max_speed_rpm": round(session.max_speed_rpm, 2),
+        "avg_speed_rpm": round(session.avg_speed_rpm, 2),
+        "pedal_speed_rpm": round(session.pedal_speed_rpm, 2),
+        "difficulty_level": session.difficulty_level
+    }
+
+
+@app.get("/api/treading/leaderboard")
+async def treading_leaderboard(metric: str = "water_lifted_liters", n: int = 10):
+    top = _treading_manager.get_leaderboard(metric, n)
+    return {
+        "metric": metric,
+        "leaderboard": [{
+            "rank": i + 1,
+            "user_name": s.user_name,
+            "water_lifted_liters": round(s.water_lifted_liters, 2),
+            "calories_burned": round(s.calories_burned, 2),
+            "duration_seconds": round(s.duration_seconds, 1),
+            "avg_speed_rpm": round(s.avg_speed_rpm, 2),
+            "difficulty_level": s.difficulty_level
+        } for i, s in enumerate(top)]
+    }
 
 
 if __name__ == "__main__":

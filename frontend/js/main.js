@@ -1,5 +1,9 @@
 import { DragonBoneWaterwheel3D } from './dragon_bone_waterwheel_3d.js';
 import { EfficiencyPanel } from './efficiency_panel.js';
+import { DynastyPanel } from './dynasty_panel.js';
+import { PumpComparisonPanel } from './pump_comparison_panel.js';
+import { SchedulingPanel } from './scheduling_panel.js';
+import { TreadingExperience } from './treading_experience.js';
 
 class WaterwheelDashboard {
     constructor() {
@@ -30,6 +34,15 @@ class WaterwheelDashboard {
 
         this.wheel3D = null;
         this.panel = null;
+        this.dynastyPanel = null;
+        this.pumpPanel = null;
+        this.schedulingPanel = null;
+        this.treadingExp = null;
+
+        this._dynastyLoaded = false;
+        this._comparisonLoaded = false;
+        this._schedulingLoaded = false;
+        this._treadingLoaded = false;
 
         this.init();
     }
@@ -45,6 +58,10 @@ class WaterwheelDashboard {
     init() {
         this.panel = new EfficiencyPanel();
         this.wheel3D = new DragonBoneWaterwheel3D('waterwheel-canvas').init();
+        this.dynastyPanel = new DynastyPanel();
+        this.pumpPanel = new PumpComparisonPanel();
+        this.schedulingPanel = new SchedulingPanel();
+        this.treadingExp = new TreadingExperience(this.wheel3D);
         this.setupUI();
         this.setupTabs();
         this.setupControls();
@@ -83,8 +100,66 @@ class WaterwheelDashboard {
                 btn.classList.add('active');
                 document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
                 if (btn.dataset.tab === 'history') this.loadHistory();
+                if (btn.dataset.tab === 'dynasty') this._initDynastyTab();
+                if (btn.dataset.tab === 'comparison') this._initComparisonTab();
+                if (btn.dataset.tab === 'scheduling') this._initSchedulingTab();
+                if (btn.dataset.tab === 'treading') this._initTreadingTab();
             });
         });
+    }
+
+    async _initDynastyTab() {
+        if (this._dynastyLoaded) return;
+        this._dynastyLoaded = true;
+        try {
+            const data = await this.dynastyPanel.loadDynastyData();
+            this.dynastyPanel.renderComparison(document.getElementById('dynasty-comparison'));
+            const timeline = await this.dynastyPanel.loadTimeline();
+            this.dynastyPanel.renderTimeline(document.getElementById('dynasty-timeline'));
+            const scores = await this.dynastyPanel.loadScores();
+            this.dynastyPanel.renderRadarChart('chart-dynasty-radar', scores);
+            this.dynastyPanel.renderEvolutionChart('chart-dynasty-evolution');
+        } catch (e) {
+            console.error('朝代演变数据加载失败:', e);
+        }
+    }
+
+    async _initComparisonTab() {
+        if (this._comparisonLoaded) return;
+        this._comparisonLoaded = true;
+        try {
+            const curves = await this.pumpPanel.loadEfficiencyCurves(5, 30);
+            this.pumpPanel.renderEfficiencyChart('chart-comparison-efficiency', curves);
+            const env = await this.pumpPanel.loadEnvironmentalImpact();
+            this.pumpPanel.renderEnvironmentalCard(document.getElementById('comparison-environmental'), env);
+            const summary = await this.pumpPanel.loadSummary();
+            this.pumpPanel.renderSummaryCard(document.getElementById('comparison-summary'), summary);
+        } catch (e) {
+            console.error('跨时代对比数据加载失败:', e);
+        }
+    }
+
+    async _initSchedulingTab() {
+        if (this._schedulingLoaded) return;
+        this._schedulingLoaded = true;
+        try {
+            const wheels = await this.schedulingPanel.loadWheelStatus();
+            this.schedulingPanel.renderWheelCards(document.getElementById('scheduling-wheels'), wheels);
+            const zones = await this.schedulingPanel.loadZoneList();
+            this.schedulingPanel.renderZoneCards(document.getElementById('scheduling-zones'), zones);
+        } catch (e) {
+            console.error('调度数据加载失败:', e);
+        }
+    }
+
+    _initTreadingTab() {
+        if (this._treadingLoaded) return;
+        this._treadingLoaded = true;
+        this.treadingExp.renderControls(document.querySelector('.treading-controls-panel'));
+        this.treadingExp.renderDashboard(document.getElementById('tread-dashboard'));
+        this.treadingExp.loadLeaderboard('water_lifted_liters').then(data => {
+            this.treadingExp.renderLeaderboard(document.getElementById('tread-leaderboard'), data);
+        }).catch(() => {});
     }
 
     setupControls() {
@@ -103,6 +178,188 @@ class WaterwheelDashboard {
         document.getElementById('btn-reset-view')?.addEventListener('click', () => {
             this.wheel3D.resetView();
         });
+
+        document.getElementById('btn-dynasty-simulate')?.addEventListener('click', () => this.runDynastySimulation());
+        document.getElementById('btn-dynasty-compare')?.addEventListener('click', () => {
+            this._dynastyLoaded = false;
+            this._initDynastyTab();
+        });
+
+        document.getElementById('btn-comparison-full')?.addEventListener('click', () => this.runFullComparison());
+
+        document.getElementById('btn-sched-add-wheel')?.addEventListener('click', () => this.addSchedulingWheel());
+        document.getElementById('btn-sched-add-zone')?.addEventListener('click', () => this.addSchedulingZone());
+        document.getElementById('btn-sched-optimize')?.addEventListener('click', () => this.runSchedulingOptimize());
+        document.getElementById('btn-sched-reset')?.addEventListener('click', async () => {
+            await this.schedulingPanel.resetScheduler();
+            this._schedulingLoaded = false;
+            this._initSchedulingTab();
+        });
+
+        document.getElementById('btn-tread-start')?.addEventListener('click', () => this.startTreading());
+        document.getElementById('btn-tread-stop')?.addEventListener('click', () => this.stopTreading());
+    }
+
+    async runDynastySimulation() {
+        const btn = document.getElementById('btn-dynasty-simulate');
+        if (btn) { btn.textContent = '⏳ 仿真中...'; btn.disabled = true; }
+        try {
+            const dynasty = document.getElementById('dynasty-select')?.value || 'song';
+            const speed = parseFloat(document.getElementById('dynasty-speed')?.value || 15);
+            const level = parseFloat(document.getElementById('dynasty-level')?.value || 2);
+            const result = await this.dynastyPanel.simulateDynasty(dynasty, speed, level);
+            const panel = document.getElementById('dynasty-simulation-panel');
+            if (panel) panel.style.display = '';
+            this.dynastyPanel.renderSimulation(document.getElementById('dynasty-simulation-result'), result);
+        } catch (e) {
+            console.error('朝代仿真失败:', e);
+        } finally {
+            if (btn) { btn.textContent = '🏛️ 朝代仿真'; btn.disabled = false; }
+        }
+    }
+
+    async runFullComparison() {
+        const btn = document.getElementById('btn-comparison-full');
+        if (btn) { btn.textContent = '⏳ 分析中...'; btn.disabled = true; }
+        try {
+            const waterLevel = parseFloat(document.getElementById('cmp-water-level')?.value || 2);
+            const flowRate = parseFloat(document.getElementById('cmp-flow-rate')?.value || 10);
+            const annualHours = parseFloat(document.getElementById('cmp-annual-hours')?.value || 2000);
+
+            const fullResult = await this.pumpPanel.loadFullComparison(waterLevel, flowRate, annualHours);
+
+            this.pumpPanel.renderEfficiencyRings(
+                document.getElementById('comparison-efficiency-rings'),
+                fullResult?.efficiency_comparison?.waterwheel_overall_efficiency || 0.4,
+                fullResult?.efficiency_comparison?.pump_overall_efficiency || 0.69
+            );
+
+            const costData = await this.pumpPanel.loadCostComparison(annualHours, flowRate, waterLevel);
+            this.pumpPanel.renderCostBreakdown('chart-comparison-cost', costData);
+        } catch (e) {
+            console.error('跨时代对比失败:', e);
+        } finally {
+            if (btn) { btn.textContent = '⚡ 综合对比分析'; btn.disabled = false; }
+        }
+    }
+
+    async addSchedulingWheel() {
+        const id = 'wheel_' + Date.now().toString(36);
+        await this.schedulingPanel.addWheel({
+            wheel_id: id,
+            location_x: Math.random() * 100,
+            location_y: Math.random() * 100,
+            max_speed: 20 + Math.random() * 10,
+            available_hours: 8 + Math.floor(Math.random() * 4)
+        });
+        const wheels = await this.schedulingPanel.loadWheelStatus();
+        this.schedulingPanel.renderWheelCards(document.getElementById('scheduling-wheels'), wheels);
+    }
+
+    async addSchedulingZone() {
+        const id = 'zone_' + Date.now().toString(36);
+        const crops = ['wheat', 'rice', 'corn', 'vegetable'];
+        const soils = ['loam', 'clay', 'sand', 'silt'];
+        await this.schedulingPanel.addZone({
+            zone_id: id,
+            area_m2: 1000 + Math.random() * 4000,
+            crop_type: crops[Math.floor(Math.random() * crops.length)],
+            soil_type: soils[Math.floor(Math.random() * soils.length)],
+            water_requirement_m3: 30 + Math.random() * 70,
+            elevation_m: Math.random() * 10,
+            distance_to_source_m: 50 + Math.random() * 200,
+            priority: Math.floor(1 + Math.random() * 5)
+        });
+        const zones = await this.schedulingPanel.loadZoneList();
+        this.schedulingPanel.renderZoneCards(document.getElementById('scheduling-zones'), zones);
+    }
+
+    async runSchedulingOptimize() {
+        const btn = document.getElementById('btn-sched-optimize');
+        if (btn) { btn.textContent = '⏳ 优化中...'; btn.disabled = true; }
+        try {
+            const result = await this.schedulingPanel.optimizeSchedule(100, 8);
+            this.schedulingPanel.renderAllocationTable(document.getElementById('scheduling-allocations'), result?.allocations || []);
+
+            const schedule = await this.schedulingPanel.loadSchedule();
+            this.schedulingPanel.renderGanttChart('chart-scheduling-gantt', schedule);
+            this.schedulingPanel.renderCapacityGauge(
+                document.getElementById('scheduling-capacity'),
+                schedule?.total_daily_capacity_m3 || 0,
+                100
+            );
+
+            const recs = await this.schedulingPanel.loadRecommendations();
+            this.schedulingPanel.renderRecommendations(document.getElementById('scheduling-recommendations'), recs);
+        } catch (e) {
+            console.error('调度优化失败:', e);
+        } finally {
+            if (btn) { btn.textContent = '🔄 优化调度'; btn.disabled = false; }
+        }
+    }
+
+    async startTreading() {
+        const userName = document.getElementById('tread-username')?.value || '体验者';
+        const difficulty = parseInt(document.getElementById('tread-difficulty')?.value || '3');
+        await this.treadingExp.startSession(userName, difficulty);
+        this.treadingExp.startLocalSimulation();
+
+        const dashboard = document.getElementById('tread-dashboard');
+        const startBtn = document.getElementById('btn-tread-start');
+        const stopBtn = document.getElementById('btn-tread-stop');
+        const hint = document.getElementById('tread-hint');
+        if (dashboard) dashboard.style.display = '';
+        if (startBtn) startBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = '';
+        if (hint) hint.style.display = '';
+
+        this._treadDashboardInterval = setInterval(() => {
+            const state = this.treadingExp.getCurrentState();
+            if (!state) return;
+            const cadenceEl = document.getElementById('tread-cadence');
+            const speedEl = document.getElementById('tread-wheel-speed');
+            const waterEl = document.getElementById('tread-water');
+            const calEl = document.getElementById('tread-calories');
+            const timeEl = document.getElementById('tread-elapsed');
+            const fatEl = document.getElementById('tread-fatigue');
+            if (cadenceEl) cadenceEl.textContent = Math.round(state.pedal_cadence || 0);
+            if (speedEl) speedEl.textContent = (state.wheel_rpm || 0).toFixed(1);
+            if (waterEl) waterEl.textContent = (state.water_lifted_liters || 0).toFixed(1);
+            if (calEl) calEl.textContent = (state.calories_burned || 0).toFixed(1);
+            if (timeEl) {
+                const s = Math.floor(state.duration_seconds || 0);
+                const m = Math.floor(s / 60);
+                timeEl.textContent = `${m}:${(s % 60).toString().padStart(2, '0')}`;
+            }
+            if (fatEl) {
+                const fatigue = Math.max(0, 1 - (state.fatigue_factor || 1));
+                fatEl.style.width = (fatigue * 100) + '%';
+            }
+        }, 200);
+    }
+
+    async stopTreading() {
+        this.treadingExp.stopLocalSimulation();
+        if (this._treadDashboardInterval) {
+            clearInterval(this._treadDashboardInterval);
+            this._treadDashboardInterval = null;
+        }
+        const result = await this.treadingExp.endSession();
+
+        const startBtn = document.getElementById('btn-tread-start');
+        const stopBtn = document.getElementById('btn-tread-stop');
+        if (startBtn) startBtn.style.display = '';
+        if (stopBtn) stopBtn.style.display = 'none';
+
+        if (result) {
+            this.treadingExp.renderEndSummary(document.getElementById('tread-summary'), result);
+            const summaryPanel = document.getElementById('tread-summary-panel');
+            if (summaryPanel) summaryPanel.style.display = '';
+        }
+
+        this.treadingExp.loadLeaderboard('water_lifted_liters').then(data => {
+            this.treadingExp.renderLeaderboard(document.getElementById('tread-leaderboard'), data);
+        }).catch(() => {});
     }
 
     updateSensorDisplay(data) {
