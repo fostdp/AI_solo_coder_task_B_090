@@ -53,10 +53,11 @@ from irrigation import (
     SoilParameters,
     IrrigationSystemConfig
 )
-from dynasty import DynastyType, DynastyEvolutionAnalyzer
-from pump_comparison import CrossEraComparison, FullComparison as _FullCmp
-from scheduling import MultiWheelScheduler, WaterWheelUnit, IrrigationZone, MaintenanceStatus
-from treading import TreadingExperienceManager
+from evolution_analyzer import DynastyType, DynastyEvolutionAnalyzer
+from era_comparator import CrossEraComparison, FullComparison as _FullCmp
+from fleet_scheduler import MultiWheelScheduler, WaterWheelUnit, IrrigationZone, MaintenanceStatus
+from vr_waterwheel import TreadingExperienceManager
+from mechanics_worker import MechanicsWorker
 
 from dataclasses import asdict
 
@@ -67,11 +68,14 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 async def lifespan(app: FastAPI):
     db = get_influxdb_manager()
     alert_mgr = get_alert_manager()
+    _mechanics_worker.start()
     print("✅ 后端系统启动完成")
     print(f"  - InfluxDB: {'已连接' if db.is_connected() else '未连接'}")
     print(f"  - 告警系统: 已就绪")
+    print(f"  - 力学仿真Worker: PID={_mechanics_worker._process.pid if _mechanics_worker._process else 'N/A'}")
     yield
     db.close()
+    _mechanics_worker.stop()
     print("🔌 后端系统已关闭")
 
 
@@ -670,6 +674,8 @@ _dynasty_analyzer = DynastyEvolutionAnalyzer()
 _cross_era_comparison = CrossEraComparison()
 _scheduler = MultiWheelScheduler()
 _treading_manager = TreadingExperienceManager()
+_mechanics_worker = MechanicsWorker()
+_waterwheel_sim = WaterWheelSimulator()
 
 
 class DynastyParamsRequest(BaseModel):
@@ -956,6 +962,54 @@ async def treading_leaderboard(metric: str = "water_lifted_liters", n: int = 10)
             "avg_speed_rpm": round(s.avg_speed_rpm, 2),
             "difficulty_level": s.difficulty_level
         } for i, s in enumerate(top)]
+    }
+
+
+class MechanicsSimRequest(BaseModel):
+    rotational_speed: float = Field(15.0, description="转速 rpm")
+    water_level_diff: float = Field(2.0, description="水位差 m")
+    water_lift: float = Field(0.0, description="实际提水高度 m，0为自动估算")
+    chain_wear_factor: float = Field(0.05, description="链条磨损因子 0-1")
+
+
+@app.get("/api/mechanics/worker/status")
+async def mechanics_worker_status():
+    return {
+        "is_running": _mechanics_worker.is_alive(),
+        "pending_tasks": _mechanics_worker.pending_count,
+        "cached_results": _mechanics_worker.result_cache_size,
+    }
+
+
+@app.post("/api/mechanics/worker/simulate")
+async def mechanics_worker_simulate(req: MechanicsSimRequest):
+    if not _mechanics_worker.is_alive():
+        raise HTTPException(status_code=503, detail="力学仿真Worker未运行")
+
+    geom_dict = asdict(_waterwheel_sim.geometry)
+    mat_dict = asdict(_waterwheel_sim.material)
+    water_lift = req.water_lift if req.water_lift > 0 else _waterwheel_sim._estimate_water_lift(
+        req.rotational_speed, req.water_level_diff
+    )
+    sim_input_dict = {
+        "rotational_speed": req.rotational_speed,
+        "water_level_diff": req.water_level_diff,
+        "water_lift": water_lift,
+        "chain_wear_factor": req.chain_wear_factor,
+    }
+
+    task_id = _mechanics_worker.submit_task(sim_input_dict, geom_dict, mat_dict, cache_key="default-wheel")
+    result = _mechanics_worker.wait_result(task_id, timeout=5.0)
+    if result is None:
+        raise HTTPException(status_code=504, detail="仿真计算超时")
+    if result["status"] == "error":
+        raise HTTPException(status_code=500, detail=f"仿真失败: {result['error']}")
+
+    return {
+        "task_id": task_id,
+        "elapsed_s": result["elapsed_s"],
+        "worker_pid": result["worker_pid"],
+        "simulation_result": result["result"],
     }
 
 
