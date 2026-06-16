@@ -1,18 +1,11 @@
 """
-模块重构说明:
-- 原模块名: scheduling.py
-- 新模块名: fleet_scheduler.py
-- 主类名: MultiWheelScheduler (保持不变)
-- 重构日期: 2026-06-16
-- 说明: 多水车联合灌溉调度优化模块整体迁移，所有 dataclass、枚举和类保持不变
-
 多水车联合灌溉调度优化模块
 基于贪心分配与负载均衡策略，协调多台龙骨水车的灌溉调度
 
 核心模型:
 1. 水车单元管理 (WaterWheelUnit)
 2. 灌溉区域管理 (IrrigationZone)
-3. 多水车调度器 (MultiWheelScheduler)
+3. 多水车调度器 (FleetScheduler)
 4. 贪心分配算法 (Greedy Allocation)
 5. 负载均衡优化 (Load Balancing)
 """
@@ -29,15 +22,15 @@ from irrigation import (
 )
 
 __all__ = [
-    "MaintenanceStatus",
-    "CommunicationDelayConfig",
-    "CommunicationDelayResult",
-    "CommunicationDelaySimulator",
-    "WaterWheelUnit",
-    "IrrigationZone",
-    "WheelAllocation",
-    "TimeSlot",
-    "MultiWheelScheduler",
+    'MaintenanceStatus',
+    'CommunicationDelayConfig',
+    'CommunicationDelayResult',
+    'CommunicationDelaySimulator',
+    'WaterWheelUnit',
+    'IrrigationZone',
+    'WheelAllocation',
+    'TimeSlot',
+    'FleetScheduler',
 ]
 
 
@@ -263,7 +256,7 @@ class TimeSlot:
     estimated_water_m3: float
 
 
-class MultiWheelScheduler:
+class FleetScheduler:
     def __init__(self, comm_config: Optional[CommunicationDelayConfig] = None):
         self.wheels: List[WaterWheelUnit] = []
         self.zones: List[IrrigationZone] = []

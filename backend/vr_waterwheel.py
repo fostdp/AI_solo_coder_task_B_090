@@ -1,12 +1,3 @@
-"""
-重构说明
-原模块名: treading.py
-新模块名: vr_waterwheel.py
-主类名保持不变: TreadingExperienceManager
-迁移日期: 2026-06-16
-说明: 将原踩踏互动模块完整迁移至VR水车模块，所有类、数据结构和逻辑保持不变。
-"""
-
 import math
 import uuid
 from datetime import datetime
@@ -18,9 +9,9 @@ from mechanics import WaterWheelSimulator, SimulationInput, WaterWheelGeometry, 
 
 __all__ = [
     "TreadingSession",
-    "TreadingPhysics",
-    "TreadingLeaderboard",
-    "TreadingExperienceManager",
+    "VRPedalPhysics",
+    "VRLeaderboard",
+    "VRWaterwheelExperience",
 ]
 
 
@@ -53,7 +44,7 @@ class TreadingSession:
             self.avg_speed_rpm = sum(self._speed_samples) / len(self._speed_samples)
 
 
-class TreadingPhysics:
+class VRPedalPhysics:
     GEAR_RATIO = 3.5
     BASE_POWER_W = 100.0
     PEAK_POWER_W = 300.0
@@ -195,7 +186,7 @@ class TreadingPhysics:
         return rate * (duration_s / 60.0)
 
 
-class TreadingLeaderboard:
+class VRLeaderboard:
     def __init__(self):
         self.sessions: List[TreadingSession] = []
 
@@ -222,10 +213,10 @@ class TreadingLeaderboard:
         return max(user_sessions, key=lambda s: s.water_lifted_liters)
 
 
-class TreadingExperienceManager:
+class VRWaterwheelExperience:
     def __init__(self):
-        self.physics = TreadingPhysics()
-        self.leaderboard = TreadingLeaderboard()
+        self.physics = VRPedalPhysics()
+        self.leaderboard = VRLeaderboard()
         self.active_sessions: Dict[str, TreadingSession] = {}
         self._session_rpm: Dict[str, float] = {}
 

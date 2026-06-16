@@ -53,30 +53,23 @@ from irrigation import (
     SoilParameters,
     IrrigationSystemConfig
 )
-from evolution_analyzer import DynastyType, DynastyEvolutionAnalyzer
-from era_comparator import CrossEraComparison, FullComparison as _FullCmp
-from fleet_scheduler import MultiWheelScheduler, WaterWheelUnit, IrrigationZone, MaintenanceStatus
-from vr_waterwheel import TreadingExperienceManager
-from mechanics_worker import MechanicsWorker
+from dynasty import DynastyType, DynastyEvolutionAnalyzer
+from pump_comparison import CrossEraComparison, FullComparison as _FullCmp
+from scheduling import MultiWheelScheduler, WaterWheelUnit, IrrigationZone, MaintenanceStatus
+from treading import TreadingExperienceManager
+
+from evolution_analyzer import EvolutionAnalyzer, DynastyType as EvolutionDynastyType
+from era_comparator import EraComparator
+from fleet_scheduler import FleetScheduler, WaterWheelUnit as FleetWheelUnit, IrrigationZone as FleetZone, MaintenanceStatus as FleetStatus
+from vr_waterwheel import VRWaterwheelExperience
+from mechanics_worker import MechanicsWorkerProcess, AsyncSimulationClient, run_simulation_sync, SimulationTaskStatus
 
 from dataclasses import asdict
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    db = get_influxdb_manager()
-    alert_mgr = get_alert_manager()
-    _mechanics_worker.start()
-    print("✅ 后端系统启动完成")
-    print(f"  - InfluxDB: {'已连接' if db.is_connected() else '未连接'}")
-    print(f"  - 告警系统: 已就绪")
-    print(f"  - 力学仿真Worker: PID={_mechanics_worker._process.pid if _mechanics_worker._process else 'N/A'}")
-    yield
-    db.close()
-    _mechanics_worker.stop()
-    print("🔌 后端系统已关闭")
+
 
 
 app = FastAPI(
@@ -674,8 +667,20 @@ _dynasty_analyzer = DynastyEvolutionAnalyzer()
 _cross_era_comparison = CrossEraComparison()
 _scheduler = MultiWheelScheduler()
 _treading_manager = TreadingExperienceManager()
-_mechanics_worker = MechanicsWorker()
-_waterwheel_sim = WaterWheelSimulator()
+
+_evolution_analyzer = EvolutionAnalyzer()
+_era_comparator = EraComparator()
+_fleet_scheduler = FleetScheduler()
+_vr_experience = VRWaterwheelExperience()
+_mechanics_worker = None
+
+
+def get_mechanics_worker():
+    global _mechanics_worker
+    if _mechanics_worker is None:
+        _mechanics_worker = MechanicsWorkerProcess(num_workers=2)
+        _mechanics_worker.start()
+    return _mechanics_worker
 
 
 class DynastyParamsRequest(BaseModel):
@@ -965,52 +970,414 @@ async def treading_leaderboard(metric: str = "water_lifted_liters", n: int = 10)
     }
 
 
-class MechanicsSimRequest(BaseModel):
+class EvolutionSimRequest(BaseModel):
+    dynasty: str = Field("han", description="朝代: han/tang/song")
     rotational_speed: float = Field(15.0, description="转速 rpm")
     water_level_diff: float = Field(2.0, description="水位差 m")
-    water_lift: float = Field(0.0, description="实际提水高度 m，0为自动估算")
-    chain_wear_factor: float = Field(0.05, description="链条磨损因子 0-1")
 
 
-@app.get("/api/mechanics/worker/status")
-async def mechanics_worker_status():
+@app.get("/api/evolution/params")
+async def evolution_get_params(dynasty: str = "han"):
+    try:
+        dt = EvolutionDynastyType(dynasty)
+    except ValueError:
+        dt = EvolutionDynastyType.HAN
+    return _evolution_analyzer.get_dynasty_params(dt)
+
+
+@app.get("/api/evolution/compare")
+async def evolution_compare():
+    return _evolution_analyzer.compare_dynasties()
+
+
+@app.post("/api/evolution/simulate")
+async def evolution_simulate(req: EvolutionSimRequest):
+    try:
+        dt = EvolutionDynastyType(req.dynasty)
+    except ValueError:
+        dt = EvolutionDynastyType.HAN
+    return _evolution_analyzer.simulate_dynasty(dt, req.rotational_speed, req.water_level_diff)
+
+
+@app.get("/api/evolution/timeline")
+async def evolution_timeline():
+    return {"timeline": _evolution_analyzer.get_evolution_timeline()}
+
+
+@app.get("/api/evolution/score")
+async def evolution_score(dynasty: str = "han"):
+    try:
+        dt = EvolutionDynastyType(dynasty)
+    except ValueError:
+        dt = EvolutionDynastyType.HAN
+    return _evolution_analyzer.get_technology_score(dt)
+
+
+class EraEfficiencyRequest(BaseModel):
+    water_level: float = Field(2.0, description="水位差 m")
+    flow_rate_m3h: float = Field(10.0, description="流量 m³/h")
+
+
+class EraCostRequest(BaseModel):
+    annual_operating_hours: float = Field(2000.0, description="年运行小时")
+    flow_rate_m3h: float = Field(10.0, description="流量 m³/h")
+    water_level: float = Field(2.0, description="水位差 m")
+
+
+class EraFullRequest(BaseModel):
+    water_level: float = Field(2.0, description="水位差 m")
+    flow_rate_m3h: float = Field(10.0, description="流量 m³/h")
+    hours_per_year: float = Field(2000.0, description="年运行小时")
+
+
+@app.post("/api/era/comparison/efficiency")
+async def era_comparison_efficiency(req: EraEfficiencyRequest):
+    return _era_comparator.compare_efficiency(req.water_level, req.flow_rate_m3h)
+
+
+@app.post("/api/era/comparison/costs")
+async def era_comparison_costs(req: EraCostRequest):
+    return _era_comparator.compare_costs(req.annual_operating_hours, req.flow_rate_m3h, req.water_level)
+
+
+@app.get("/api/era/comparison/environmental")
+async def era_comparison_environmental():
+    return _era_comparator.compare_environmental_impact()
+
+
+@app.get("/api/era/comparison/summary")
+async def era_comparison_summary():
+    return _era_comparator.get_comparison_summary()
+
+
+@app.get("/api/era/comparison/curves")
+async def era_comparison_curves(min_speed: float = 5.0, max_speed: float = 30.0, steps: int = 20):
+    return {"curves": _era_comparator.get_efficiency_curves(min_speed, max_speed, steps)}
+
+
+@app.post("/api/era/comparison/full")
+async def era_comparison_full(req: EraFullRequest):
+    result = _era_comparator.compare_at_same_conditions(
+        req.water_level, req.flow_rate_m3h, req.hours_per_year
+    )
+    return asdict(result)
+
+
+class FleetAddWheelRequest(BaseModel):
+    wheel_id: str = Field(..., description="水车ID")
+    location_x: float = Field(0.0, description="位置X")
+    location_y: float = Field(0.0, description="位置Y")
+    max_speed: float = Field(25.0, description="最大转速 rpm")
+    available_hours: float = Field(10.0, description="每日可用小时")
+
+
+class FleetAddZoneRequest(BaseModel):
+    zone_id: str = Field(..., description="区域ID")
+    area_m2: float = Field(2000.0, description="面积 m²")
+    crop_type: str = Field("wheat", description="作物类型")
+    soil_type: str = Field("loam", description="土壤类型")
+    water_requirement_m3: float = Field(50.0, description="需水量 m³")
+    elevation_m: float = Field(0.0, description="海拔 m")
+    distance_to_source_m: float = Field(100.0, description="距水源距离 m")
+    priority: int = Field(3, description="优先级 1-5")
+
+
+class FleetOptimizeRequest(BaseModel):
+    target_water_m3: float = Field(100.0, description="目标总水量 m³")
+    hours_available: float = Field(8.0, description="可用小时")
+
+
+@app.post("/api/fleet/wheels")
+async def fleet_add_wheel(req: FleetAddWheelRequest):
+    wheel = FleetWheelUnit(
+        wheel_id=req.wheel_id,
+        location=(req.location_x, req.location_y),
+        geometry_params=WaterWheelGeometry(),
+        material_params=MaterialProperties(),
+        max_speed=req.max_speed,
+        available_hours_per_day=req.available_hours
+    )
+    _fleet_scheduler.add_wheel(wheel)
+    return {"success": True, "wheel_id": req.wheel_id}
+
+
+@app.get("/api/fleet/wheels")
+async def fleet_list_wheels():
+    return {"wheels": _fleet_scheduler.get_wheel_status()}
+
+
+@app.post("/api/fleet/zones")
+async def fleet_add_zone(req: FleetAddZoneRequest):
+    try:
+        crop = CropType(req.crop_type)
+    except ValueError:
+        crop = CropType.GENERAL
+    try:
+        soil = SoilType(req.soil_type)
+    except ValueError:
+        soil = SoilType.LOAM
+    zone = FleetZone(
+        zone_id=req.zone_id,
+        area_m2=req.area_m2,
+        crop_type=crop,
+        soil_type=soil,
+        water_requirement_m3=req.water_requirement_m3,
+        elevation_m=req.elevation_m,
+        distance_to_source_m=req.distance_to_source_m,
+        priority=req.priority
+    )
+    _fleet_scheduler.add_zone(zone)
+    return {"success": True, "zone_id": req.zone_id}
+
+
+@app.get("/api/fleet/zones")
+async def fleet_list_zones():
+    return {"zones": [{"zone_id": z.zone_id, "area_m2": z.area_m2, "priority": z.priority,
+                        "water_requirement_m3": z.water_requirement_m3} for z in _fleet_scheduler._zones]}
+
+
+@app.post("/api/fleet/optimize")
+async def fleet_optimize(req: FleetOptimizeRequest):
+    return _fleet_scheduler.optimize_schedule(req.target_water_m3, req.hours_available)
+
+
+@app.get("/api/fleet/status")
+async def fleet_status():
     return {
-        "is_running": _mechanics_worker.is_alive(),
-        "pending_tasks": _mechanics_worker.pending_count,
-        "cached_results": _mechanics_worker.result_cache_size,
+        "total_capacity_m3": _fleet_scheduler.calculate_total_capacity(),
+        "wheels": _fleet_scheduler.get_wheel_status()
     }
 
 
-@app.post("/api/mechanics/worker/simulate")
-async def mechanics_worker_simulate(req: MechanicsSimRequest):
-    if not _mechanics_worker.is_alive():
-        raise HTTPException(status_code=503, detail="力学仿真Worker未运行")
+@app.get("/api/fleet/schedule")
+async def fleet_generate():
+    return _fleet_scheduler.generate_schedule()
 
-    geom_dict = asdict(_waterwheel_sim.geometry)
-    mat_dict = asdict(_waterwheel_sim.material)
-    water_lift = req.water_lift if req.water_lift > 0 else _waterwheel_sim._estimate_water_lift(
-        req.rotational_speed, req.water_level_diff
-    )
-    sim_input_dict = {
+
+@app.get("/api/fleet/recommendations")
+async def fleet_recommendations():
+    return {"recommendations": _fleet_scheduler.get_recommendations()}
+
+
+@app.post("/api/fleet/reset")
+async def fleet_reset():
+    global _fleet_scheduler
+    _fleet_scheduler = FleetScheduler()
+    return {"success": True}
+
+
+class VRStartRequest(BaseModel):
+    user_name: str = Field("匿名用户", description="用户名")
+    difficulty: int = Field(3, description="难度 1-5")
+
+
+class VRUpdateRequest(BaseModel):
+    pedal_force: float = Field(100.0, description="踏板力 N")
+    pedal_cadence: float = Field(30.0, description="踏频 rpm")
+    elapsed: float = Field(0.0, description="已过时间 s")
+    dt: float = Field(0.1, description="时间步长 s")
+
+
+@app.post("/api/vr/experience/start")
+async def vr_experience_start(req: VRStartRequest):
+    session = _vr_experience.create_session(req.user_name, req.difficulty)
+    return {
+        "session_id": session.session_id,
+        "user_name": session.user_name,
+        "difficulty": session.difficulty_level,
+        "start_time": session.start_time.isoformat() if session.start_time else None
+    }
+
+
+@app.post("/api/vr/experience/{session_id}/update")
+async def vr_experience_update(session_id: str, req: VRUpdateRequest):
+    result = _vr_experience.update_session(session_id, {
+        "pedal_force": req.pedal_force,
+        "pedal_cadence": req.pedal_cadence,
+        "elapsed": req.elapsed,
+        "dt": req.dt
+    })
+    if result is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return result
+
+
+@app.post("/api/vr/experience/{session_id}/end")
+async def vr_experience_end(session_id: str):
+    session = _vr_experience.end_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session.session_id,
+        "user_name": session.user_name,
+        "duration_seconds": session.duration_seconds,
+        "water_lifted_liters": round(session.water_lifted_liters, 2),
+        "calories_burned": round(session.calories_burned, 2),
+        "stroke_count": session.stroke_count,
+        "max_speed_rpm": round(session.max_speed_rpm, 2),
+        "avg_speed_rpm": round(session.avg_speed_rpm, 2),
+        "difficulty_level": session.difficulty_level
+    }
+
+
+@app.get("/api/vr/experience/{session_id}")
+async def vr_experience_get_session(session_id: str):
+    session = _vr_experience.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session.session_id,
+        "user_name": session.user_name,
+        "duration_seconds": session.duration_seconds,
+        "water_lifted_liters": round(session.water_lifted_liters, 2),
+        "calories_burned": round(session.calories_burned, 2),
+        "stroke_count": session.stroke_count,
+        "max_speed_rpm": round(session.max_speed_rpm, 2),
+        "avg_speed_rpm": round(session.avg_speed_rpm, 2),
+        "pedal_speed_rpm": round(session.pedal_speed_rpm, 2),
+        "difficulty_level": session.difficulty_level
+    }
+
+
+@app.get("/api/vr/leaderboard")
+async def vr_leaderboard(metric: str = "water_lifted_liters", n: int = 10):
+    top = _vr_experience.get_leaderboard(metric, n)
+    return {
+        "metric": metric,
+        "leaderboard": [{
+            "rank": i + 1,
+            "user_name": s.user_name,
+            "water_lifted_liters": round(s.water_lifted_liters, 2),
+            "calories_burned": round(s.calories_burned, 2),
+            "duration_seconds": round(s.duration_seconds, 1),
+            "avg_speed_rpm": round(s.avg_speed_rpm, 2),
+            "difficulty_level": s.difficulty_level
+        } for i, s in enumerate(top)]
+    }
+
+
+class WorkerSimRequest(BaseModel):
+    rotational_speed: float = Field(15.0, description="转速 rpm")
+    water_level_diff: float = Field(2.0, description="水位差 m")
+    chain_wear_factor: float = Field(0.0, description="链条磨损系数 0~1")
+    geometry: Optional[Dict] = Field(None, description="自定义几何参数")
+    material: Optional[Dict] = Field(None, description="自定义材料参数")
+
+
+class WorkerBatchRequest(BaseModel):
+    tasks: List[WorkerSimRequest]
+
+
+@app.post("/api/worker/simulate")
+async def worker_simulate(req: WorkerSimRequest):
+    worker = get_mechanics_worker()
+    sim_input = {
         "rotational_speed": req.rotational_speed,
         "water_level_diff": req.water_level_diff,
-        "water_lift": water_lift,
         "chain_wear_factor": req.chain_wear_factor,
     }
+    if req.geometry:
+        sim_input["geometry"] = req.geometry
+    if req.material:
+        sim_input["material"] = req.material
 
-    task_id = _mechanics_worker.submit_task(sim_input_dict, geom_dict, mat_dict, cache_key="default-wheel")
-    result = _mechanics_worker.wait_result(task_id, timeout=5.0)
+    task_id = worker.submit_task(sim_input)
+    return {"task_id": task_id, "status": "submitted"}
+
+
+@app.get("/api/worker/task/{task_id}")
+async def worker_get_task(task_id: str, wait: bool = False, timeout: float = 5.0):
+    worker = get_mechanics_worker()
+    if wait:
+        task = worker.wait_for_task(task_id, timeout=timeout)
+    else:
+        task = worker.get_task(task_id)
+
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    return task.to_dict()
+
+
+@app.post("/api/worker/batch")
+async def worker_batch(req: WorkerBatchRequest):
+    worker = get_mechanics_worker()
+    task_ids = []
+    for t in req.tasks:
+        sim_input = {
+            "rotational_speed": t.rotational_speed,
+            "water_level_diff": t.water_level_diff,
+            "chain_wear_factor": t.chain_wear_factor,
+        }
+        if t.geometry:
+            sim_input["geometry"] = t.geometry
+        if t.material:
+            sim_input["material"] = t.material
+        task_ids.append(worker.submit_task(sim_input))
+
+    return {"task_ids": task_ids, "count": len(task_ids)}
+
+
+@app.post("/api/worker/sync/simulate")
+async def worker_sync_simulate(req: WorkerSimRequest):
+    sim_input = {
+        "rotational_speed": req.rotational_speed,
+        "water_level_diff": req.water_level_diff,
+        "chain_wear_factor": req.chain_wear_factor,
+    }
+    if req.geometry:
+        sim_input["geometry"] = req.geometry
+    if req.material:
+        sim_input["material"] = req.material
+
+    result = run_simulation_sync(sim_input, timeout=10.0)
     if result is None:
-        raise HTTPException(status_code=504, detail="仿真计算超时")
-    if result["status"] == "error":
-        raise HTTPException(status_code=500, detail=f"仿真失败: {result['error']}")
+        raise HTTPException(status_code=504, detail="Simulation timed out")
+    return {"result": result}
+
+
+@app.get("/api/worker/status")
+async def worker_status():
+    worker = get_mechanics_worker()
+    total = len(worker._tasks)
+    pending = sum(1 for t in worker._tasks.values() if t.status == SimulationTaskStatus.PENDING)
+    running = sum(1 for t in worker._tasks.values() if t.status == SimulationTaskStatus.RUNNING)
+    completed = sum(1 for t in worker._tasks.values() if t.status == SimulationTaskStatus.COMPLETED)
+    failed = sum(1 for t in worker._tasks.values() if t.status == SimulationTaskStatus.FAILED)
 
     return {
-        "task_id": task_id,
-        "elapsed_s": result["elapsed_s"],
-        "worker_pid": result["worker_pid"],
-        "simulation_result": result["result"],
+        "running": worker._running,
+        "num_workers": worker.num_workers,
+        "total_tasks": total,
+        "pending_tasks": pending,
+        "running_tasks": running,
+        "completed_tasks": completed,
+        "failed_tasks": failed,
     }
+
+
+@app.post("/api/worker/stop")
+async def worker_stop():
+    global _mechanics_worker
+    if _mechanics_worker is not None:
+        _mechanics_worker.stop()
+        _mechanics_worker = None
+    return {"success": True, "message": "Worker stopped"}
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = get_influxdb_manager()
+    alert_mgr = get_alert_manager()
+    print("✅ 后端系统启动完成")
+    print(f"  - InfluxDB: {'已连接' if db.is_connected() else '未连接'}")
+    print(f"  - 告警系统: 已就绪")
+    yield
+    db.close()
+    global _mechanics_worker
+    if _mechanics_worker is not None:
+        _mechanics_worker.stop()
+    print("🔌 后端系统已关闭")
 
 
 if __name__ == "__main__":

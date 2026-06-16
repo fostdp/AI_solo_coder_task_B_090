@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-重构说明:
-- 原模块名: pump_comparison.py
-- 新模块名: era_comparator.py
-- 主类名保持不变: CrossEraComparison
-- 迁移日期: 2026-06-16
-- 迁移原因: 模块重命名以更准确反映跨时代对比的核心功能
-"""
 """
 龙骨水车与现代离心泵跨时代效率对比模块
 对比古代龙骨水车与近代离心泵的效率、成本与环境影响
@@ -33,7 +24,7 @@ __all__ = [
     "CentrifugalPumpModel",
     "WaterwheelOperatingCost",
     "PumpOperatingCost",
-    "CrossEraComparison",
+    "EraComparator",
 ]
 
 
@@ -428,7 +419,7 @@ class PumpOperatingCost:
         )
 
 
-class CrossEraComparison:
+class EraComparator:
     def __init__(
         self,
         pump_model: Optional[CentrifugalPumpModel] = None,

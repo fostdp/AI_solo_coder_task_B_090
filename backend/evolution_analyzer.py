@@ -1,18 +1,20 @@
 """
-朝代水车技术演进分析模块 - 独立重构版本
+朝代水车技术演进分析模块
 分析汉、唐、宋三代龙骨水车技术参数演变与性能对比
-
-重构说明：
-- 原模块名: dynasty.py
-- 新模块名: evolution_analyzer.py
-- 主类保持 DynastyEvolutionAnalyzer
-- 支持向后兼容 import，原 dynasty.py 保留别名引用
 """
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List
 
 from mechanics import WaterWheelSimulator, SimulationInput, WaterWheelGeometry, MaterialProperties
+
+
+__all__ = [
+    "DynastyType",
+    "ArchaeologicalSource",
+    "DynastyParameters",
+    "EvolutionAnalyzer",
+]
 
 
 class DynastyType(Enum):
@@ -276,7 +278,7 @@ _DYNASTY_DATA: Dict[DynastyType, DynastyParameters] = {
 }
 
 
-class DynastyEvolutionAnalyzer:
+class EvolutionAnalyzer:
 
     def get_dynasty_params(self, dynasty: DynastyType) -> Dict:
         params = _DYNASTY_DATA[dynasty]
@@ -534,12 +536,3 @@ class DynastyEvolutionAnalyzer:
             },
             "综合得分": overall,
         }
-
-
-# 向后兼容别名，原 dynasty.py 可直接导入这些符号
-__all__ = [
-    "DynastyType",
-    "ArchaeologicalSource",
-    "DynastyParameters",
-    "DynastyEvolutionAnalyzer",
-]
