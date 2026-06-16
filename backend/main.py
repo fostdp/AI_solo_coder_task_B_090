@@ -342,6 +342,7 @@ async def run_mechanics_simulation(req: MechanicsSimRequest):
     )
 
     result = simulator.simulate(sim_input)
+    water_level_corrections = simulator.scrape_model.get_water_level_corrections(req.water_level_diff)
 
     return {
         "input": {
@@ -359,13 +360,22 @@ async def run_mechanics_simulation(req: MechanicsSimRequest):
         "overall_efficiency": result.overall_efficiency,
         "chain_tension_max_N": result.chain_tension_max,
         "chain_tension_min_N": result.chain_tension_min,
+        "polygonal_effect": {
+            "speed_velocity_factor_kv": result.speed_velocity_factor,
+            "dynamic_load_coefficient": result.chain_impact_coefficient,
+            "loss_torque_Nm": result.polygonal_effect_loss,
+            "sprocket_teeth_upper": geom.num_sprockets_upper,
+            "description": "链传动多边形效应：齿数越少，速度波动和动载荷越大"
+        },
         "resistance_breakdown": {
             "scrape_resistance_N": result.scrape_resistance,
             "chain_weight_resistance_N": result.chain_weight_resistance,
             "bending_resistance_N": result.bending_resistance,
             "friction_resistance_N": result.friction_resistance,
-            "water_acceleration_resistance_N": result.water_acceleration_resistance
+            "water_acceleration_resistance_N": result.water_acceleration_resistance,
+            "polygonal_effect_equivalent_force_N": result.polygonal_effect_loss / max(geom.upper_wheel_diameter / 2, 0.001)
         },
+        "water_level_corrections": water_level_corrections,
         "chain_failure_risk": result.chain_failure_risk.value,
         "chain_fatigue_life_hours": result.chain_fatigue_life_hours,
         "geometry": {

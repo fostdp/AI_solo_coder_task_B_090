@@ -243,7 +243,8 @@ export class WaterwheelScene {
         this.chainLength = 2 * tangentLen + 2 * halfArc;
 
         const numLinks = 60;
-        const linkSpacing = this.chainLength / numLinks;
+        this.numChainLinks = numLinks;
+        this.chainLinkSpacing = this.chainLength / numLinks;
 
         const linkGeo = new THREE.BoxGeometry(0.1, 0.04, 0.08);
         const linkMat = new THREE.MeshStandardMaterial({
@@ -259,34 +260,86 @@ export class WaterwheelScene {
             metalness: 0.7
         });
 
+        const combinedGeo = new THREE.BufferGeometry();
+        const linkPosAttr = linkGeo.attributes.position;
+        const pinPosAttr = pinGeo.attributes.position;
+        const linkIdxAttr = linkGeo.index;
+        const pinIdxAttr = pinGeo.index;
+
+        const allPositions = [];
+        const allIndices = [];
+        const allNormals = [];
+        let vertexOffset = 0;
+
+        const addGeometry = (geo, offsetX = 0, offsetY = 0, offsetZ = 0, rotX = 0, rotY = 0, rotZ = 0) => {
+            const positions = geo.attributes.position.array;
+            const normals = geo.attributes.normal ? geo.attributes.normal.array : null;
+            const indices = geo.index ? geo.index.array : null;
+
+            const cosZ = Math.cos(rotZ), sinZ = Math.sin(rotZ);
+            const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+
+            for (let i = 0; i < positions.length; i += 3) {
+                let x = positions[i], y = positions[i + 1], z = positions[i + 2];
+                let x1 = x * cosZ - y * sinZ;
+                let y1 = x * sinZ + y * cosZ;
+                let z1 = z;
+                let y2 = y1 * cosX - z1 * sinX;
+                let z2 = y1 * sinX + z1 * cosX;
+                allPositions.push(x1 + offsetX, y2 + offsetY, z2 + offsetZ);
+                if (normals) {
+                    const nx = normals[i], ny = normals[i+1], nz = normals[i+2];
+                    let nx1 = nx * cosZ - ny * sinZ;
+                    let ny1 = nx * sinZ + ny * cosZ;
+                    let nz1 = nz;
+                    let ny2 = ny1 * cosX - nz1 * sinX;
+                    let nz2 = ny1 * sinX + nz1 * cosX;
+                    allNormals.push(nx1, ny2, nz2);
+                }
+            }
+
+            if (indices) {
+                for (let i = 0; i < indices.length; i++) {
+                    allIndices.push(indices[i] + vertexOffset);
+                }
+            } else {
+                for (let i = 0; i < positions.length / 3; i++) {
+                    allIndices.push(i + vertexOffset);
+                }
+            }
+
+            vertexOffset += positions.length / 3;
+        };
+
+        addGeometry(linkGeo);
+        addGeometry(pinGeo, -0.04, 0, 0, Math.PI / 2, 0, 0);
+        addGeometry(pinGeo, 0.04, 0, 0, Math.PI / 2, 0, 0);
+
+        combinedGeo.setAttribute('position', new THREE.Float32BufferAttribute(allPositions, 3));
+        combinedGeo.setIndex(allIndices);
+        combinedGeo.computeVertexNormals();
+
+        this.chainLinksInstanced = new THREE.InstancedMesh(combinedGeo, linkMat, numLinks);
+        this.chainLinksInstanced.castShadow = true;
+        this.chainLinksInstanced.receiveShadow = true;
+        this.chainLinksInstanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+        this.chainLinksVisible = new Array(numLinks).fill(true);
+
         this.chainPath = this.createPathPoints(upperY, lowerY, radius);
 
+        const dummy = new THREE.Object3D();
         for (let i = 0; i < numLinks; i++) {
-            const linkGroup = new THREE.Group();
-            const link = new THREE.Mesh(linkGeo, linkMat);
-            link.castShadow = true;
-            linkGroup.add(link);
-
-            const pin1 = new THREE.Mesh(pinGeo, pinMat);
-            pin1.rotation.x = Math.PI / 2;
-            pin1.position.x = -0.04;
-            linkGroup.add(pin1);
-
-            const pin2 = pin1.clone();
-            pin2.position.x = 0.04;
-            linkGroup.add(pin2);
-
-            const pos = this.getPointOnPath(i * linkSpacing / this.chainLength, upperY, lowerY, radius);
-            linkGroup.position.copy(pos.position);
-            linkGroup.rotation.z = pos.rotation;
-
-            this.chainLinks.push({
-                mesh: linkGroup,
-                index: i,
-                isBladeHolder: i % 2 === 0
-            });
-            this.wheelGroup.add(linkGroup);
+            const pos = this.getPointOnPath(i * this.chainLinkSpacing / this.chainLength, upperY, lowerY, radius);
+            dummy.position.copy(pos.position);
+            dummy.rotation.z = pos.rotation;
+            dummy.updateMatrix();
+            this.chainLinksInstanced.setMatrixAt(i, dummy.matrix);
         }
+        this.chainLinksInstanced.instanceMatrix.needsUpdate = true;
+        this.wheelGroup.add(this.chainLinksInstanced);
+
+        this._dummyChain = new THREE.Object3D();
     }
 
     createPathPoints(upperY, lowerY, radius) {
@@ -336,6 +389,10 @@ export class WaterwheelScene {
 
     createBlades(upperY, lowerY) {
         const radius = 0.6;
+        const numBlades = 24;
+        this.numBlades = numBlades;
+        this.bladeSpacing = this.chainLength / numBlades;
+
         const bladeGeo = new THREE.BoxGeometry(0.08, 0.22, 0.5);
         const woodTexture = this.createWoodTexture(0x8B4513);
         const bladeMat = new THREE.MeshStandardMaterial({
@@ -352,31 +409,102 @@ export class WaterwheelScene {
             metalness: 0.0
         });
 
-        const numBlades = 24;
+        const allPositions = [];
+        const allIndices = [];
+        const allUVs = [];
+        let vertexOffset = 0;
 
+        const addBoxGeometry = (geo, offsetX = 0, offsetY = 0, offsetZ = 0, useUV = false) => {
+            const positions = geo.attributes.position.array;
+            const uvs = geo.attributes.uv ? geo.attributes.uv.array : null;
+            const indices = geo.index ? geo.index.array : null;
+
+            for (let i = 0; i < positions.length; i += 3) {
+                allPositions.push(positions[i] + offsetX, positions[i + 1] + offsetY, positions[i + 2] + offsetZ);
+            }
+
+            if (useUV && uvs) {
+                for (let i = 0; i < uvs.length; i++) {
+                    allUVs.push(uvs[i]);
+                }
+            }
+
+            if (indices) {
+                for (let i = 0; i < indices.length; i++) {
+                    allIndices.push(indices[i] + vertexOffset);
+                }
+            } else {
+                for (let i = 0; i < positions.length / 3; i++) {
+                    allIndices.push(i + vertexOffset);
+                }
+            }
+
+            vertexOffset += positions.length / 3;
+        };
+
+        const combinedGeo = new THREE.BufferGeometry();
+        const bPositions = bladeGeo.attributes.position.array;
+        const bIndices = bladeGeo.index.array;
+        const bUVs = bladeGeo.attributes.uv.array;
+        const hPositions = holderGeo.attributes.position.array;
+        const hIndices = holderGeo.index.array;
+        const hUVs = holderGeo.attributes.uv.array;
+
+        const totalVertices = (bPositions.length / 3 + 2 * hPositions.length / 3);
+        const totalIndices = bIndices.length + 2 * hIndices.length;
+        const posArray = new Float32Array(totalVertices * 3);
+        const uvArray = new Float32Array(totalVertices * 2);
+        const idxArray = new Uint32Array(totalIndices);
+
+        let vOff = 0;
+        let iOff = 0;
+        const copyGeometry = (geo, offsetX, offsetY, offsetZ) => {
+            const p = geo.attributes.position.array;
+            const u = geo.attributes.uv.array;
+            const idx = geo.index.array;
+            for (let i = 0; i < p.length; i += 3) {
+                posArray[vOff * 3 + i] = p[i] + offsetX;
+                posArray[vOff * 3 + i + 1] = p[i + 1] + offsetY;
+                posArray[vOff * 3 + i + 2] = p[i + 2] + offsetZ;
+            }
+            for (let i = 0; i < u.length; i++) {
+                uvArray[vOff * 2 + i] = u[i];
+            }
+            for (let i = 0; i < idx.length; i++) {
+                idxArray[iOff + i] = idx[i] + vOff;
+            }
+            vOff += p.length / 3;
+            iOff += idx.length;
+        };
+
+        copyGeometry(bladeGeo, 0, 0, 0);
+        copyGeometry(holderGeo, 0, 0, 0.28);
+        copyGeometry(holderGeo, 0, 0, -0.28);
+
+        combinedGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        combinedGeo.setAttribute('uv', new THREE.BufferAttribute(uvArray, 2));
+        combinedGeo.setIndex(new THREE.BufferAttribute(idxArray, 1));
+        combinedGeo.computeVertexNormals();
+
+        this.bladesInstanced = new THREE.InstancedMesh(combinedGeo, bladeMat, numBlades);
+        this.bladesInstanced.castShadow = true;
+        this.bladesInstanced.receiveShadow = true;
+        this.bladesInstanced.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+        this.bladesVisible = new Array(numBlades).fill(true);
+
+        const dummy = new THREE.Object3D();
         for (let i = 0; i < numBlades; i++) {
-            const bladeGroup = new THREE.Group();
-
-            const blade = new THREE.Mesh(bladeGeo, bladeMat);
-            blade.castShadow = true;
-            blade.receiveShadow = true;
-            bladeGroup.add(blade);
-
-            const holder1 = new THREE.Mesh(holderGeo, holderMat);
-            holder1.position.z = 0.28;
-            bladeGroup.add(holder1);
-
-            const holder2 = holder1.clone();
-            holder2.position.z = -0.28;
-            bladeGroup.add(holder2);
-
-            this.blades.push({
-                mesh: bladeGroup,
-                index: i,
-                bladeObject: blade
-            });
-            this.wheelGroup.add(bladeGroup);
+            const pos = this.getPointOnPath(i * this.bladeSpacing / this.chainLength, upperY, lowerY, radius);
+            dummy.position.copy(pos.position);
+            dummy.rotation.z = pos.rotation;
+            dummy.updateMatrix();
+            this.bladesInstanced.setMatrixAt(i, dummy.matrix);
         }
+        this.bladesInstanced.instanceMatrix.needsUpdate = true;
+        this.wheelGroup.add(this.bladesInstanced);
+
+        this._dummyBlade = new THREE.Object3D();
     }
 
     createTrough(upperY, lowerY) {
@@ -587,9 +715,31 @@ export class WaterwheelScene {
 
     setBrokenBlade(index) {
         this.brokenBladeIndex = index;
-        this.blades.forEach((b, i) => {
-            b.mesh.visible = (i !== index);
-        });
+        if (this.bladesInstanced && this._dummyBlade) {
+            const numBlades = this.numBlades || 24;
+            const radius = 0.6;
+            const upperY = 5;
+            const lowerY = 1.5;
+            const bladeSpacing = this.chainLength / numBlades;
+            const dummy = this._dummyBlade;
+            for (let i = 0; i < numBlades; i++) {
+                if (i === index) {
+                    dummy.scale.set(0.001, 0.001, 0.001);
+                    dummy.updateMatrix();
+                    this.bladesInstanced.setMatrixAt(i, dummy.matrix);
+                    continue;
+                }
+                const dist = (i * bladeSpacing + this.chainProgress * this.chainLength) % this.chainLength;
+                const t = dist / this.chainLength;
+                const pos = this.getPointOnPath(t, upperY, lowerY, radius);
+                dummy.position.copy(pos.position);
+                dummy.rotation.z = pos.rotation;
+                dummy.scale.set(1, 1, 1);
+                dummy.updateMatrix();
+                this.bladesInstanced.setMatrixAt(i, dummy.matrix);
+            }
+            this.bladesInstanced.instanceMatrix.needsUpdate = true;
+        }
     }
 
     toggleAutoRotate() {
@@ -623,30 +773,52 @@ export class WaterwheelScene {
         const chainSpeed = this.rotationalSpeed / 60;
         this.chainProgress = (this.chainProgress + chainSpeed * delta * 0.5) % 1;
 
-        const numLinks = this.chainLinks.length;
-        const numBlades = this.blades.length;
+        const numLinks = this.numChainLinks || 60;
+        const numBlades = this.numBlades || 24;
         const radius = 0.6;
         const upperY = 5;
         const lowerY = 1.5;
+        const now = Date.now() * 0.005;
 
-        for (let i = 0; i < numLinks; i++) {
-            const t = ((i / numLinks + this.chainProgress) % 1 + 1) % 1;
-            const pos = this.getPointOnPath(t, upperY, lowerY, radius);
-            this.chainLinks[i].mesh.position.copy(pos.position);
-            this.chainLinks[i].mesh.rotation.z = pos.rotation;
+        if (this.chainLinksInstanced) {
+            const dummy = this._dummyChain;
+            for (let i = 0; i < numLinks; i++) {
+                const t = ((i / numLinks + this.chainProgress) % 1 + 1) % 1;
+                const pos = this.getPointOnPath(t, upperY, lowerY, radius);
+                dummy.position.copy(pos.position);
+                dummy.rotation.z = pos.rotation;
+                if (i === this.brokenBladeIndex) {
+                    dummy.scale.set(0.001, 0.001, 0.001);
+                } else {
+                    dummy.scale.set(1, 1, 1);
+                }
+                dummy.updateMatrix();
+                this.chainLinksInstanced.setMatrixAt(i, dummy.matrix);
+            }
+            this.chainLinksInstanced.instanceMatrix.needsUpdate = true;
         }
 
-        const bladeSpacing = this.chainLength / numBlades;
-        for (let i = 0; i < numBlades; i++) {
-            if (i === this.brokenBladeIndex) continue;
-            const dist = (i * bladeSpacing + this.chainProgress * this.chainLength) % this.chainLength;
-            const t = dist / this.chainLength;
-            const pos = this.getPointOnPath(t, upperY, lowerY, radius);
-            this.blades[i].mesh.position.copy(pos.position);
-            this.blades[i].mesh.rotation.z = pos.rotation;
-
-            const scale = 0.9 + Math.sin(Date.now() * 0.005 + i) * 0.02;
-            this.blades[i].mesh.scale.set(scale, scale, scale);
+        if (this.bladesInstanced) {
+            const dummy = this._dummyBlade;
+            const bladeSpacing = this.chainLength / numBlades;
+            for (let i = 0; i < numBlades; i++) {
+                if (i === this.brokenBladeIndex) {
+                    dummy.scale.set(0.001, 0.001, 0.001);
+                    dummy.updateMatrix();
+                    this.bladesInstanced.setMatrixAt(i, dummy.matrix);
+                    continue;
+                }
+                const dist = (i * bladeSpacing + this.chainProgress * this.chainLength) % this.chainLength;
+                const t = dist / this.chainLength;
+                const pos = this.getPointOnPath(t, upperY, lowerY, radius);
+                dummy.position.copy(pos.position);
+                dummy.rotation.z = pos.rotation;
+                const scale = 0.9 + Math.sin(now + i) * 0.02;
+                dummy.scale.set(scale, scale, scale);
+                dummy.updateMatrix();
+                this.bladesInstanced.setMatrixAt(i, dummy.matrix);
+            }
+            this.bladesInstanced.instanceMatrix.needsUpdate = true;
         }
 
         const wheelOmega = this.rotationalSpeed * 2 * Math.PI / 60;
