@@ -186,11 +186,13 @@ class TreadingExperienceManager:
         current_rpm = self._session_rpm.get(session_id, 0.0)
 
         difficulty_mult = self.physics.get_difficulty_multiplier(session.difficulty_level)
-        adjusted_force = pedal_force * difficulty_mult
+        efficiency_factor = 1.0 / difficulty_mult
+        adjusted_force = pedal_force * efficiency_factor
+        adjusted_cadence = pedal_cadence * efficiency_factor
 
         state = self.physics.get_instantaneous_state(
             pedal_force=adjusted_force,
-            pedal_cadence=pedal_cadence,
+            pedal_cadence=adjusted_cadence,
             elapsed=elapsed,
             current_rpm=current_rpm,
             dt=dt,
