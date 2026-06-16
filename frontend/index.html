@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>古代龙骨水车力学仿真与灌溉效率分析系统</title>
+<link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+<header class="app-header">
+    <div class="header-left">
+        <div class="logo-icon">⚙️</div>
+        <div>
+            <h1>汉代龙骨水车</h1>
+            <p class="subtitle">力学仿真与灌溉效率分析系统</p>
+        </div>
+    </div>
+    <div class="header-center">
+        <div class="wheel-selector">
+            <label>水车编号:</label>
+            <select id="wheel-select">
+                <option value="han_dynasty_wheel_001">汉代一号水车 (陕西遗址)</option>
+            </select>
+        </div>
+        <div class="connection-status" id="connection-status">
+            <span class="status-dot offline"></span>
+            <span class="status-text">未连接</span>
+        </div>
+    </div>
+    <div class="header-right">
+        <div class="current-time" id="current-time"></div>
+    </div>
+</header>
+
+<div class="app-container">
+    <aside class="left-panel">
+        <div class="panel-section">
+            <h2 class="panel-title">📊 实时传感器数据</h2>
+            <div class="sensor-grid">
+                <div class="sensor-card">
+                    <div class="sensor-label">转速</div>
+                    <div class="sensor-value" id="sensor-speed">0.00</div>
+                    <div class="sensor-unit">rpm</div>
+                    <div class="sensor-bar"><div class="sensor-bar-fill" id="bar-speed"></div></div>
+                </div>
+                <div class="sensor-card">
+                    <div class="sensor-label">扭矩</div>
+                    <div class="sensor-value" id="sensor-torque">0.00</div>
+                    <div class="sensor-unit">N·m</div>
+                    <div class="sensor-bar"><div class="sensor-bar-fill" id="bar-torque"></div></div>
+                </div>
+                <div class="sensor-card">
+                    <div class="sensor-label">提水量</div>
+                    <div class="sensor-value" id="sensor-water">0.00</div>
+                    <div class="sensor-unit">L/min</div>
+                    <div class="sensor-bar"><div class="sensor-bar-fill" id="bar-water"></div></div>
+                </div>
+                <div class="sensor-card">
+                    <div class="sensor-label">水位差</div>
+                    <div class="sensor-value" id="sensor-level">0.00</div>
+                    <div class="sensor-unit">m</div>
+                    <div class="sensor-bar"><div class="sensor-bar-fill" id="bar-level"></div></div>
+                </div>
+                <div class="sensor-card highlight">
+                    <div class="sensor-label">链张力</div>
+                    <div class="sensor-value" id="sensor-tension">0</div>
+                    <div class="sensor-unit">N</div>
+                    <div class="sensor-bar"><div class="sensor-bar-fill" id="bar-tension"></div></div>
+                </div>
+                <div class="sensor-card highlight">
+                    <div class="sensor-label">综合效率</div>
+                    <div class="sensor-value" id="sensor-efficiency">0.0%</div>
+                    <div class="sensor-unit">&nbsp;</div>
+                    <div class="sensor-bar"><div class="sensor-bar-fill efficiency-bar" id="bar-efficiency"></div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h2 class="panel-title">⚡ 实时告警</h2>
+            <div class="alert-container" id="alert-container">
+                <div class="no-alerts">暂无告警</div>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <h2 class="panel-title">🎛️ 仿真控制</h2>
+            <div class="control-form">
+                <div class="form-row">
+                    <label>目标转速 (rpm)</label>
+                    <input type="range" id="ctrl-speed" min="0" max="40" step="0.5" value="15">
+                    <span id="ctrl-speed-val">15.0</span>
+                </div>
+                <div class="form-row">
+                    <label>水位差 (m)</label>
+                    <input type="range" id="ctrl-level" min="0.5" max="4" step="0.1" value="2.0">
+                    <span id="ctrl-level-val">2.0</span>
+                </div>
+                <div class="form-row">
+                    <label>链条磨损</label>
+                    <input type="range" id="ctrl-wear" min="0" max="100" step="1" value="10">
+                    <span id="ctrl-wear-val">10%</span>
+                </div>
+                <button class="btn-primary" id="btn-simulate">🔬 运行力学仿真</button>
+            </div>
+        </div>
+    </aside>
+
+    <main class="main-content">
+        <div class="canvas-container">
+            <canvas id="waterwheel-canvas"></canvas>
+            <div class="canvas-overlay">
+                <div class="overlay-info">
+                    <span>🔗 链传动</span>
+                    <span>💧 水流粒子</span>
+                    <span>⚙️ 力学仿真</span>
+                </div>
+                <div class="overlay-controls">
+                    <button class="btn-ghost" id="btn-rotate-toggle">🔄 自动旋转</button>
+                    <button class="btn-ghost" id="btn-wireframe">📐 线框模式</button>
+                    <button class="btn-ghost" id="btn-reset-view">🎯 重置视角</button>
+                </div>
+            </div>
+            <div class="canvas-legend">
+                <div class="legend-item"><span class="legend-color" style="background:#8B4513"></span>木轮轴</div>
+                <div class="legend-item"><span class="legend-color" style="background:#D2691E"></span>龙骨板链</div>
+                <div class="legend-item"><span class="legend-color" style="background:#654321"></span>木槽水道</div>
+                <div class="legend-item"><span class="legend-color" style="background:#4FC3F7"></span>水流粒子</div>
+            </div>
+        </div>
+
+        <div class="data-tabs">
+            <div class="tab-buttons">
+                <button class="tab-btn active" data-tab="charts">📈 数据图表</button>
+                <button class="tab-btn" data-tab="mechanics">⚙️ 力学分析</button>
+                <button class="tab-btn" data-tab="irrigation">💧 灌溉效率</button>
+                <button class="tab-btn" data-tab="history">📜 历史数据</button>
+            </div>
+
+            <div class="tab-content active" id="tab-charts">
+                <div class="charts-grid">
+                    <div class="chart-panel">
+                        <h3>转速趋势</h3>
+                        <canvas id="chart-speed"></canvas>
+                    </div>
+                    <div class="chart-panel">
+                        <h3>扭矩变化</h3>
+                        <canvas id="chart-torque"></canvas>
+                    </div>
+                    <div class="chart-panel wide">
+                        <h3>效率与提水量</h3>
+                        <canvas id="chart-efficiency"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-mechanics">
+                <div class="analysis-grid">
+                    <div class="analysis-panel">
+                        <h3>驱动力矩分析</h3>
+                        <div class="result-grid">
+                            <div class="result-item">
+                                <label>输出力矩</label>
+                                <span id="mech-output-torque">0 N·m</span>
+                            </div>
+                            <div class="result-item">
+                                <label>驱动力矩</label>
+                                <span id="mech-drive-torque">0 N·m</span>
+                            </div>
+                            <div class="result-item">
+                                <label>输入功率</label>
+                                <span id="mech-input-power">0 W</span>
+                            </div>
+                            <div class="result-item">
+                                <label>输出功率</label>
+                                <span id="mech-output-power">0 W</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="analysis-panel">
+                        <h3>阻力分解</h3>
+                        <div class="bar-chart-container">
+                            <div class="h-bar">
+                                <label>刮水阻力</label>
+                                <div class="h-bar-track"><div class="h-bar-fill scrape" id="bar-scrape"></div></div>
+                                <span id="val-scrape">0N</span>
+                            </div>
+                            <div class="h-bar">
+                                <label>链重量阻力</label>
+                                <div class="h-bar-track"><div class="h-bar-fill weight" id="bar-weight"></div></div>
+                                <span id="val-weight">0N</span>
+                            </div>
+                            <div class="h-bar">
+                                <label>弯曲阻力</label>
+                                <div class="h-bar-track"><div class="h-bar-fill bend" id="bar-bend"></div></div>
+                                <span id="val-bend">0N</span>
+                            </div>
+                            <div class="h-bar">
+                                <label>摩擦阻力</label>
+                                <div class="h-bar-track"><div class="h-bar-fill friction" id="bar-friction"></div></div>
+                                <span id="val-friction">0N</span>
+                            </div>
+                            <div class="h-bar">
+                                <label>水加速阻力</label>
+                                <div class="h-bar-track"><div class="h-bar-fill accel" id="bar-accel"></div></div>
+                                <span id="val-accel">0N</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="analysis-panel">
+                        <h3>效率指标</h3>
+                        <div class="efficiency-rings">
+                            <div class="ring-item">
+                                <canvas id="ring-mech" width="120" height="120"></canvas>
+                                <label>机械效率</label>
+                            </div>
+                            <div class="ring-item">
+                                <canvas id="ring-hyd" width="120" height="120"></canvas>
+                                <label>水力效率</label>
+                            </div>
+                            <div class="ring-item">
+                                <canvas id="ring-overall" width="120" height="120"></canvas>
+                                <label>综合效率</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="analysis-panel">
+                        <h3>链条健康</h3>
+                        <div class="health-status">
+                            <div class="health-metric">
+                                <label>最大张力</label>
+                                <span id="health-tmax">0 N</span>
+                            </div>
+                            <div class="health-metric">
+                                <label>最小张力</label>
+                                <span id="health-tmin">0 N</span>
+                            </div>
+                            <div class="health-metric">
+                                <label>失效风险</label>
+                                <span id="health-risk" class="risk-low">正常</span>
+                            </div>
+                            <div class="health-metric">
+                                <label>疲劳寿命</label>
+                                <span id="health-life">0 h</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-irrigation">
+                <div class="irrigation-form">
+                    <h3>灌溉参数设置</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>灌溉面积 (m²)</label>
+                            <input type="number" id="irr-area" value="2000" min="100">
+                        </div>
+                        <div class="form-group">
+                            <label>每日运行 (小时)</label>
+                            <input type="number" id="irr-hours" value="8" min="1" max="24">
+                        </div>
+                        <div class="form-group">
+                            <label>作物类型</label>
+                            <select id="irr-crop">
+                                <option value="rice">水稻</option>
+                                <option value="wheat" selected>小麦</option>
+                                <option value="corn">玉米</option>
+                                <option value="vegetable">蔬菜</option>
+                                <option value="general">通用</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>土壤类型</label>
+                            <select id="irr-soil">
+                                <option value="sand">砂土</option>
+                                <option value="loam" selected>壤土</option>
+                                <option value="clay">粘土</option>
+                                <option value="silt">粉土</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>参考蒸散 (mm/天)</label>
+                            <input type="number" id="irr-et0" value="5.0" step="0.1">
+                        </div>
+                        <div class="form-group">
+                            <label>初始土壤缺水</label>
+                            <input type="number" id="irr-moisture" value="0.3" step="0.05" min="0" max="1">
+                        </div>
+                    </div>
+                    <button class="btn-primary" id="btn-analyze-irrigation">📊 分析灌溉效率</button>
+                </div>
+                <div class="irrigation-results" id="irrigation-results" style="display:none;">
+                    <div class="analysis-grid">
+                        <div class="analysis-panel">
+                            <h3>水平衡分析</h3>
+                            <div class="water-balance">
+                                <div class="wb-item positive">
+                                    <span class="wb-icon">💧</span>
+                                    <div>
+                                        <label>总供水量</label>
+                                        <span id="wb-delivered">0 m³</span>
+                                    </div>
+                                </div>
+                                <div class="wb-item">
+                                    <span class="wb-icon">🌱</span>
+                                    <div>
+                                        <label>作物需水量</label>
+                                        <span id="wb-required">0 m³</span>
+                                    </div>
+                                </div>
+                                <div class="wb-item effective">
+                                    <span class="wb-icon">✅</span>
+                                    <div>
+                                        <label>有效灌溉</label>
+                                        <span id="wb-effective">0 mm</span>
+                                    </div>
+                                </div>
+                                <div class="wb-item negative">
+                                    <span class="wb-icon">🌊</span>
+                                    <div>
+                                        <label>径流损失</label>
+                                        <span id="wb-runoff">0 m³</span>
+                                    </div>
+                                </div>
+                                <div class="wb-item negative">
+                                    <span class="wb-icon">🕳️</span>
+                                    <div>
+                                        <label>深层渗漏</label>
+                                        <span id="wb-percolation">0 m³</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="analysis-panel">
+                            <h3>效率指标</h3>
+                            <div class="efficiency-rings">
+                                <div class="ring-item">
+                                    <canvas id="ring-irrig-overall" width="120" height="120"></canvas>
+                                    <label>总效率</label>
+                                </div>
+                                <div class="ring-item">
+                                    <canvas id="ring-irrig-convey" width="120" height="120"></canvas>
+                                    <label>输水效率</label>
+                                </div>
+                                <div class="ring-item">
+                                    <canvas id="ring-irrig-field" width="120" height="120"></canvas>
+                                    <label>田间效率</label>
+                                </div>
+                            </div>
+                            <div class="result-grid">
+                                <div class="result-item">
+                                    <label>面积效率</label>
+                                    <span id="irrig-area-eff">0 m²/m³</span>
+                                </div>
+                                <div class="result-item">
+                                    <label>水分生产率</label>
+                                    <span id="irrig-prod">0 kg/m³</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="analysis-panel wide">
+                            <h3>转速优化分析</h3>
+                            <canvas id="chart-optimization" height="200"></canvas>
+                            <div class="optimize-points">
+                                <div class="opt-point">
+                                    <span class="opt-label">最高效率点</span>
+                                    <span id="opt-eff-speed">0 rpm</span>
+                                    <span id="opt-eff-val">0%</span>
+                                </div>
+                                <div class="opt-point">
+                                    <span class="opt-label">最大灌溉点</span>
+                                    <span id="opt-area-speed">0 rpm</span>
+                                    <span id="opt-area-val">0 m²/h</span>
+                                </div>
+                                <div class="opt-point recommended">
+                                    <span class="opt-label">⚡推荐工况</span>
+                                    <span id="opt-bal-speed">0 rpm</span>
+                                    <span id="opt-bal-val">0%</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="analysis-panel wide">
+                            <h3>💡 系统建议</h3>
+                            <div class="recommendation-box" id="irrig-recommendation"></div>
+                            <div class="cost-estimate">
+                                <h4>成本估算</h4>
+                                <div class="result-grid">
+                                    <div class="result-item"><label>人工成本</label><span id="cost-labor">0 元</span></div>
+                                    <div class="result-item"><label>动力成本</label><span id="cost-power">0 元</span></div>
+                                    <div class="result-item"><label>维护成本</label><span id="cost-main">0 元</span></div>
+                                    <div class="result-item highlight"><label>总成本</label><span id="cost-total">0 元</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="tab-history">
+                <div class="history-toolbar">
+                    <div class="form-group">
+                        <label>时间范围</label>
+                        <select id="hist-range">
+                            <option value="-1h">最近1小时</option>
+                            <option value="-6h">最近6小时</option>
+                            <option value="-24h" selected>最近24小时</option>
+                            <option value="-7d">最近7天</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>聚合方式</label>
+                        <select id="hist-agg">
+                            <option value="">原始数据</option>
+                            <option value="mean" selected>平均</option>
+                            <option value="max">最大</option>
+                            <option value="min">最小</option>
+                        </select>
+                    </div>
+                    <button class="btn-secondary" id="btn-refresh-history">🔄 刷新</button>
+                </div>
+                <div class="history-table-container">
+                    <table class="history-table" id="history-table">
+                        <thead>
+                            <tr>
+                                <th>时间</th>
+                                <th>转速(rpm)</th>
+                                <th>扭矩(N·m)</th>
+                                <th>提水量(L/min)</th>
+                                <th>水位差(m)</th>
+                                <th>效率</th>
+                                <th>异常</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="7" class="loading">加载中...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script type="module" src="static/js/main.js"></script>
+</body>
+</html>
