@@ -1,0 +1,74 @@
+{
+  "crops": {
+    "rice": {
+      "kc_initial": 1.0, "kc_mid": 1.2, "kc_end": 1.0,
+      "root_depth_m": 0.6, "depletion_factor": 0.3,
+      "daily_water_requirement_mm": 8.0, "yield_kg_per_m2": 0.65
+    },
+    "wheat": {
+      "kc_initial": 0.4, "kc_mid": 1.15, "kc_end": 0.4,
+      "root_depth_m": 1.0, "depletion_factor": 0.5,
+      "daily_water_requirement_mm": 4.5, "yield_kg_per_m2": 0.45
+    },
+    "corn": {
+      "kc_initial": 0.3, "kc_mid": 1.2, "kc_end": 0.6,
+      "root_depth_m": 1.2, "depletion_factor": 0.5,
+      "daily_water_requirement_mm": 5.5, "yield_kg_per_m2": 0.55
+    },
+    "vegetable": {
+      "kc_initial": 0.5, "kc_mid": 1.05, "kc_end": 0.8,
+      "root_depth_m": 0.4, "depletion_factor": 0.35,
+      "daily_water_requirement_mm": 6.0, "yield_kg_per_m2": 1.5
+    },
+    "general": {
+      "kc_initial": 0.3, "kc_mid": 1.15, "kc_end": 0.6,
+      "root_depth_m": 0.8, "depletion_factor": 0.5,
+      "daily_water_requirement_mm": 5.0, "yield_kg_per_m2": 0.5
+    }
+  },
+  "soils": {
+    "sand": {
+      "field_capacity": 0.20, "wilting_point": 0.04,
+      "saturated_hydraulic_conductivity": 6.0e-5,
+      "bulk_density": 1500.0, "infiltration_k": 60.0,
+      "infiltration_n": 0.4, "surface_storage_max": 0.01
+    },
+    "loam": {
+      "field_capacity": 0.35, "wilting_point": 0.15,
+      "saturated_hydraulic_conductivity": 1.5e-5,
+      "bulk_density": 1300.0, "infiltration_k": 20.0,
+      "infiltration_n": 0.6, "surface_storage_max": 0.03
+    },
+    "clay": {
+      "field_capacity": 0.45, "wilting_point": 0.25,
+      "saturated_hydraulic_conductivity": 1.0e-6,
+      "bulk_density": 1200.0, "infiltration_k": 5.0,
+      "infiltration_n": 0.8, "surface_storage_max": 0.05
+    },
+    "silt": {
+      "field_capacity": 0.40, "wilting_point": 0.12,
+      "saturated_hydraulic_conductivity": 5.0e-6,
+      "bulk_density": 1250.0, "infiltration_k": 10.0,
+      "infiltration_n": 0.7, "surface_storage_max": 0.04
+    }
+  },
+  "system": {
+    "canal_length_m": 500.0,
+    "canal_efficiency": 0.75,
+    "distribution_efficiency": 0.85,
+    "field_application_efficiency": 0.8,
+    "num_fields": 3,
+    "field_area_m2": 2000.0,
+    "rotation_schedule": [1, 1, 1]
+  },
+  "optimization": {
+    "min_speed_rpm": 5.0,
+    "max_speed_rpm": 30.0,
+    "speed_steps": 15
+  },
+  "cost": {
+    "labor_rate_rmb_per_hour": 15.0,
+    "power_rate_rmb_per_kwh": 0.6,
+    "maintenance_ratio": 0.05
+  }
+}

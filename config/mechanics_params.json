@@ -1,0 +1,49 @@
+{
+  "geometry": {
+    "upper_wheel_diameter": 1.2,
+    "lower_wheel_diameter": 1.2,
+    "center_distance": 4.0,
+    "chain_pitch": 0.08,
+    "num_sprockets_upper": 12,
+    "num_sprockets_lower": 12,
+    "num_blades": 24,
+    "blade_width": 0.3,
+    "blade_height": 0.15,
+    "blade_thickness": 0.02,
+    "groove_depth": 0.12,
+    "channel_width": 0.35,
+    "nominal_water_level_ratio": 0.6
+  },
+  "material": {
+    "wood_density": 700.0,
+    "bamboo_density": 600.0,
+    "iron_density": 7800.0,
+    "wood_elastic_modulus": 12000000000.0,
+    "iron_elastic_modulus": 200000000000.0,
+    "wood_tensile_strength": 80000000.0,
+    "iron_tensile_strength": 250000000.0,
+    "wood_friction_coeff": 0.4,
+    "iron_friction_coeff": 0.15,
+    "water_density": 1000.0,
+    "gravity": 9.81
+  },
+  "scrape_resistance": {
+    "surface_tension_alpha": 0.18,
+    "entry_shock_beta": 0.42,
+    "low_water_level_exponent": 0.65,
+    "transition_water_level_ratio": 0.35,
+    "cd_low_water_correction": 1.6,
+    "friction_low_water_correction": 1.25,
+    "acceleration_correction": 0.7,
+    "air_entrainment_coefficient": 0.22,
+    "base_drag_coefficient": 1.28,
+    "base_friction_coefficient": 0.4,
+    "base_acceleration_coefficient": 1.0
+  },
+  "fatigue": {
+    "endurance_limit_ratio": 0.5,
+    "goodman_slope": 0.8,
+    "safety_factor": 1.5,
+    "min_fatigue_life_hours": 1000
+  }
+}
